@@ -833,6 +833,9 @@ void BookshelfGridActivity::paintGridFocusUpdate(int prevFocusedIndex, int newFo
 }
 
 void BookshelfGridActivity::loop() {
+  // Crossblot: Tenor-style axes (side buttons move across, front pair moves rows).
+  const NavAxesSwapScope navAxes(mappedInput, SETTINGS.tenorNavigation);
+
   if (longPressFired) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
       longPressFired = false;

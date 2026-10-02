@@ -555,7 +555,7 @@ inline SettingInfo buildHomeButtonActionSetting(const StrId nameId, uint8_t Cros
 // #1636) so the per-entry SettingInfo cost is paid once. Read-only consumers
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 103;  // 101 regular entries plus two optional tilt entries.
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 104;  // 102 regular entries plus two optional tilt entries.
 
 inline const std::vector<SettingInfo>& getBaseSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
@@ -726,6 +726,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                           "sideButtonLayout", StrId::STR_CAT_CONTROLS)
             .withEnumRawValues({CrossPointSettings::SIDE_BUTTONS_DISABLED, CrossPointSettings::PREV_NEXT,
                                 CrossPointSettings::NEXT_PREV, CrossPointSettings::NEXT_NEXT}));
+    add(SettingInfo::Toggle(StrId::STR_TENOR_NAVIGATION, &CrossPointSettings::tenorNavigation, "tenorNavigation",
+                            StrId::STR_CAT_CONTROLS));
     add(SettingInfo::Enum(StrId::STR_ORIENTATION_AWARE, &CrossPointSettings::sideButtonOrientationAware,
                           {StrId::STR_NO, StrId::STR_YES}, "sideButtonOrientationAware", StrId::STR_CAT_CONTROLS));
     add(SettingInfo::Enum(StrId::STR_LONG_PRESS_ACTION, &CrossPointSettings::sideButtonLongPress,

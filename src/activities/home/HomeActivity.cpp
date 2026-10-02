@@ -1533,6 +1533,9 @@ bool HomeActivity::preRenderCarouselFrames(bool showProgressPopup) {
 }
 
 void HomeActivity::loop() {
+  // Crossblot: Tenor-style axes on the row/column home layouts.
+  const NavAxesSwapScope navAxes(mappedInput, SETTINGS.tenorNavigation && usesCarouselNavigation());
+
   if (quickActionsLongPowerHandled) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Power)) {
       quickActionsLongPowerHandled = false;
@@ -2332,7 +2335,11 @@ void HomeActivity::render(RenderLock&&) {
       [&menuItems](int index) { return menuItems[index].icon; });
 
   const char* readLabel = recentBooks.empty() ? "" : tr(STR_READ);
-  const auto labels = isCarouselTheme
+  // With Tenor-style navigation the front pair moves between rows.
+  const bool frontPairIsVertical = isCarouselTheme && SETTINGS.tenorNavigation;
+  const auto labels = frontPairIsVertical
+                          ? mappedInput.mapLabels(readLabel, tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                      : isCarouselTheme
                           ? mappedInput.mapLabels(readLabel, tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
                           : mappedInput.mapLabels(readLabel, tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

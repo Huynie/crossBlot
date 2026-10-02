@@ -162,7 +162,25 @@ void MappedInputManager::expireReleaseSuppressions() const {
   releaseSuppression.expireAfterReleaseFrame(state);
 }
 
-bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
+bool MappedInputManager::mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
+  if (navAxesSwapped) {
+    switch (button) {
+      case Button::Left:
+        button = Button::Up;
+        break;
+      case Button::Right:
+        button = Button::Down;
+        break;
+      case Button::Up:
+        button = Button::Left;
+        break;
+      case Button::Down:
+        button = Button::Right;
+        break;
+      default:
+        break;
+    }
+  }
   const auto sideLayout = static_cast<CrossPointSettings::SIDE_BUTTON_LAYOUT>(SETTINGS.sideButtonLayout);
   const auto side = mapSideLayoutForReaderOrientation(kSideLayouts[sideLayout], readerMode);
 

@@ -249,10 +249,17 @@ class MappedInputManager {
 #endif
 #endif
 
+  // Crossblot (TenorCross layout): while set, logical Left/Right read the side
+  // buttons and logical Up/Down read the front Left/Right pair. Screens with a
+  // 2-D layout (Home, Bookshelf) set it around their own input handling only,
+  // via NavAxesSwapScope, so menus they open are unaffected.
+  void setNavAxesSwapped(const bool swapped) const { navAxesSwapped = swapped; }
+
  private:
   HalGPIO& gpio;
   const GfxRenderer& renderer;
   bool readerMode = false;
+  mutable bool navAxesSwapped = false;
   bool powerAsConfirmInReaderMode = false;
 #if CROSSINK_APP_CAP_TOUCH
   bool readerTouchscreenOverride = false;
@@ -317,4 +324,18 @@ class MappedInputManager {
   constexpr bool wasFrontButtonHintTapped(uint8_t) const { return false; }
   constexpr bool wasFrontButtonHintTouchedDown(uint8_t) const { return false; }
 #endif
+};
+
+// Swaps the navigation axes for the lifetime of the scope (see setNavAxesSwapped).
+class NavAxesSwapScope {
+ public:
+  NavAxesSwapScope(const MappedInputManager& input, const bool enabled) : input_(input) {
+    input_.setNavAxesSwapped(enabled);
+  }
+  ~NavAxesSwapScope() { input_.setNavAxesSwapped(false); }
+  NavAxesSwapScope(const NavAxesSwapScope&) = delete;
+  NavAxesSwapScope& operator=(const NavAxesSwapScope&) = delete;
+
+ private:
+  const MappedInputManager& input_;
 };

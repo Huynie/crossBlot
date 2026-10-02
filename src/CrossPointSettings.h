@@ -430,6 +430,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Crossblot (from CrumBLE): while asleep with a Custom sleep screen, a brief
   // power tap shows the next sleep image and goes straight back to sleep.
   uint8_t cycleScreensaverOnTap = 1;
+  // Crossblot (TenorCross layout): on Home and the Bookshelf the side buttons
+  // move left/right and the front Left/Right pair moves up/down; in Settings
+  // the side buttons switch tabs and the front pair walks the rows.
+  uint8_t tenorNavigation = 1;
   // Crossblot (CrumBLE collections): index-backed virtual collections. Off by
   // default so a fresh device never walks the whole SD card at boot.
   uint8_t showRecentlyAddedCollection = 0;

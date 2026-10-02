@@ -913,18 +913,38 @@ void SettingsActivity::loop() {
     }
     requestUpdate();
   };
-  buttonNavigator.onNextRelease([this, &moveSelection] {
-    const int next = isFileBrowserView() ? (selectedSettingIndex >= settingsCount ? 1 : selectedSettingIndex + 1)
-                                         : ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
-    moveSelection(next, true);
-  });
-  buttonNavigator.onPreviousRelease([this, &moveSelection] {
-    const int previous = isFileBrowserView() ? (selectedSettingIndex <= 1 ? settingsCount : selectedSettingIndex - 1)
-                                             : ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
-    moveSelection(previous, false);
-  });
+  // Crossblot (Tenor-style navigation): one side-button press switches tabs;
+  // the front Left/Right pair walks the rows.
+  if (SETTINGS.tenorNavigation && !isFileBrowserView()) {
+    using Button = MappedInputManager::Button;
+    buttonNavigator.onPressAndContinuous({Button::Right}, [this, &moveSelection] {
+      moveSelection(ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1), true);
+    });
+    buttonNavigator.onPressAndContinuous({Button::Left}, [this, &moveSelection] {
+      moveSelection(ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1), false);
+    });
+    if (mappedInput.wasPressed(Button::Down) || mappedInput.wasPressed(Button::Up)) {
+      const bool next = mappedInput.wasPressed(Button::Down);
+      hasChangedCategory = true;
+      showSettingSelection = true;
+      enterCategory(next ? ButtonNavigator::nextIndex(selectedCategoryIndex, categoryCount)
+                         : ButtonNavigator::previousIndex(selectedCategoryIndex, categoryCount));
+      requestUpdate();
+    }
+  } else {
+    buttonNavigator.onNextRelease([this, &moveSelection] {
+      const int next = isFileBrowserView() ? (selectedSettingIndex >= settingsCount ? 1 : selectedSettingIndex + 1)
+                                           : ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
+      moveSelection(next, true);
+    });
+    buttonNavigator.onPreviousRelease([this, &moveSelection] {
+      const int previous = isFileBrowserView() ? (selectedSettingIndex <= 1 ? settingsCount : selectedSettingIndex - 1)
+                                               : ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
+      moveSelection(previous, false);
+    });
+  }
 
-  if (!isFileBrowserView()) {
+  if (!SETTINGS.tenorNavigation && !isFileBrowserView()) {
     buttonNavigator.onNextContinuous([this, &hasChangedCategory] {
       hasChangedCategory = true;
       showSettingSelection = true;
