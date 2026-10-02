@@ -632,6 +632,7 @@ void RecentBooksGridActivity::showBookActionMenu(const int bookIndex, const bool
           case FileBrowserAction::UnpinFavorite:
           case FileBrowserAction::PinBootFavorite:
           case FileBrowserAction::UnpinBootFavorite:
+          case FileBrowserAction::AddToCollection:
           case FileBrowserAction::SetSleepFolder:
           case FileBrowserAction::ClearSleepFolder:
           case FileBrowserAction::ViewBookmarks:

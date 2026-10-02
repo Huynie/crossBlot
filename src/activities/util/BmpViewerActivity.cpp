@@ -410,6 +410,7 @@ void BmpViewerActivity::showContextMenu() {
                              case FileBrowserAction::EpubRenderMode:
                              case FileBrowserAction::ResetReaderSettings:
                              case FileBrowserAction::Rename:
+                             case FileBrowserAction::AddToCollection:
                                return;
                            }
                          });

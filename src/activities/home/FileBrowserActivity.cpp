@@ -1,4 +1,6 @@
 #include "FileBrowserActivity.h"
+#include "CollectionPickerActivity.h"
+#include "CollectionsStore.h"
 
 #include <Arduino.h>
 #include <Epub.h>
@@ -555,6 +557,7 @@ void FileBrowserActivity::showDirectoryActionMenu(const std::string& entry, bool
                              case FileBrowserAction::UnpinFavorite:
                              case FileBrowserAction::PinBootFavorite:
                              case FileBrowserAction::UnpinBootFavorite:
+                             case FileBrowserAction::AddToCollection:
                              case FileBrowserAction::ViewBookmarks:
                              case FileBrowserAction::ViewClippings:
                              case FileBrowserAction::DeleteBookmarks:
@@ -677,6 +680,12 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
   const std::string fullPath = buildFullPath(basepath, entry);
   std::vector<FileBrowserActionActivity::MenuItem> items = BookActions::buildBookActionItems(fullPath, false);
   items.insert(items.begin(), {FileBrowserAction::Rename, StrId::STR_RENAME});
+  // Crossblot: collections take e-book files only (the formats LibraryIndex indexes).
+  const bool isBookFile = FsHelpers::hasEpubExtension(fullPath) || FsHelpers::hasXtcExtension(fullPath) ||
+                          FsHelpers::hasTxtExtension(fullPath) || FsHelpers::hasMarkdownExtension(fullPath);
+  if (isBookFile) {
+    items.insert(items.begin(), {FileBrowserAction::AddToCollection, StrId::STR_ADD_TO_COLLECTION});
+  }
 
   if (BookActions::canSendNearby(fullPath)) {
     items.push_back({FileBrowserAction::SendNearby, StrId::STR_SEND_NEARBY_BOOK});
@@ -707,6 +716,17 @@ void FileBrowserActivity::showFileActionMenu(const std::string& entry, bool igno
 
         const auto action = static_cast<FileBrowserAction>(std::get<FileBrowserActionResult>(result.data).action);
         switch (action) {
+          case FileBrowserAction::AddToCollection:
+            // Home releases the collection stores; load them for the picker and
+            // write + release them again once it closes.
+            CollectionsStore::loadLibraryStores();
+            startActivityForResult(
+                std::make_unique<CollectionPickerActivity>(renderer, mappedInput, fullPath, getFileName(entry)),
+                [this](const ActivityResult&) {
+                  CollectionsStore::releaseLibraryStores();
+                  requestUpdate();
+                });
+            return;
           case FileBrowserAction::Rename:
             startRenameFile(fullPath, entry);
             return;
