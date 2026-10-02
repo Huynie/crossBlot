@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "./FileBrowserActivity.h"
+#include "CollectionsStore.h"
 #include "QuickActions.h"
 #include "activities/Activity.h"
 #include "activities/reader/BookReadingStats.h"
@@ -24,8 +25,9 @@ class HomeActivity final : public Activity {
   // Keep one rendered carousel frame in RAM. Additional frames remain available
   // through the SD snapshot cache and are paged in on demand.
   static constexpr int kCarouselFrameCount = 1;
-  // Must be >= LyraCarouselMetrics::values.homeRecentBooksCount (asserted in .cpp)
-  static constexpr int kMaxCachedBooks = 3;
+  // Must be >= the carousel themes' homeRecentBooksCount (asserted in .cpp).
+  // Crossblot: 5 for Flow's five-cover carousel (Lyra Carousel uses 3).
+  static constexpr int kMaxCachedBooks = 5;
 
  private:
   ButtonNavigator buttonNavigator;
@@ -127,6 +129,51 @@ class HomeActivity final : public Activity {
   void loadRecentBooks(int maxBooks);
   void loadAllBookStats();
   void loadRecentCovers(int coverHeight);
+
+  // ---- Crossblot: Flow theme collection shelf (HomeFlowShelf.cpp) ----
+  // Rows between the carousel and the icon bar. selectorIndex keeps owning the
+  // carousel and icon rows; shelfFocus says when the cursor is on the shelf.
+  enum class ShelfFocus : uint8_t { None, Header, Books };
+  // Position of the Recent Books entry (shown as "Bookshelf" on Flow) in the
+  // icon bar: Browse Files is always first.
+  static constexpr int kFlowBookshelfMenuIndex = 1;
+  ShelfFocus shelfFocus = ShelfFocus::None;
+  int shelfBookIndex = 0;
+  int shelfScrollOffset = 0;
+  int lastFlowMenuIndex = 0;
+  bool shelfCoversLoaded = false;
+  // A long-press is recognised while Confirm is held but acted on at release,
+  // so the release can't leak into the menu it opens.
+  enum class FlowLongPress : uint8_t { None, CarouselBook, BookshelfIcon, Header, ShelfBook };
+  FlowLongPress pendingFlowLongPress = FlowLongPress::None;
+  bool libraryStoresLoaded = false;
+  std::string shelfPathsCacheKey;
+  std::vector<ShelfEntry> shelfEntriesCache;
+  std::vector<std::string> failedShelfCovers;
+  std::string focusedMetaPath;
+  std::string focusedMetaTitle;
+  std::string focusedMetaAuthor;
+
+  static bool flowThemeActive();
+  bool flowShelfEnabled() const;
+  void invalidateShelf();
+  const std::vector<ShelfEntry>& cachedShelfEntries();
+  void loadShelfCovers(int cellWidth, int cellHeight, int visibleCount);
+  void updateFocusedShelfMeta(const std::string& path);
+  void renderFlowShelf(int pageWidth, int pageHeight);
+  void ensureShelfFocusVisible();
+  void cycleActiveCollection(int delta);
+  void leaveShelfToCarousel(int bookCount);
+  void leaveShelfToMenu(int bookCount, int menuItemCount);
+  bool handleFlowInput(int bookCount, int menuItemCount);
+  void runFlowLongPress(FlowLongPress action);
+  void openShelfEntry();
+  void onBookshelfOpen();
+  void showBookshelfCollectionPicker();
+  void launchAddBooksToActiveCollection();
+  void showFlowBookActions(const std::string& path, const std::string& title);
+  void showCollectionOptions(int initialIndex);
+  void applyCollectionOption(uint8_t option, int menuIndex);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

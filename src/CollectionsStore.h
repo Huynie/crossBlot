@@ -235,6 +235,12 @@ class CollectionsStore {
   // does that.
   void releaseMemory();
 
+  // Crossblot: Home (Flow) and the Bookshelf grid load the library stores on
+  // entry and drop them on exit, so the reader and network modes never carry
+  // them. Loading is a few small JSON reads; no SD walk.
+  static void loadLibraryStores();
+  static void releaseLibraryStores();
+
   // CrumBLE: re-sort the in-memory collections vector to match the given id
   // sequence and persist the new order. IDs present in the vector but not
   // in `orderedIds` are kept at the end in their current relative order

@@ -1069,7 +1069,9 @@ void CollectionsStore::flushDeferredSaveNowBypassGate() const {
           "Bypass-gate flush: measured=%u needed+margin=%u free=%u maxAlloc=%u",
           static_cast<unsigned>(neededBytes), neededWithMargin, freeHeap, maxAlloc);
   String json;
+#ifndef SIMULATOR  // simulator String has no reserve()
   json.reserve(neededBytes + 32);  // + tiny header padding
+#endif
   serializeJson(doc, json);
   const bool ok = writeFileWithBackup(COLLECTIONS_FILE, json);
   gCollectionsSaveDeferred = !ok;
@@ -1134,7 +1136,9 @@ bool CollectionsStore::writeToDiskNow_() const {
           static_cast<unsigned>(neededBytes), neededWithMargin, freeNow, maxAllocNow);
 
   String json;
+#ifndef SIMULATOR  // simulator String has no reserve()
   json.reserve(neededBytes + 32);
+#endif
   serializeJson(doc, json);
   // v18.9.9.331: writeFileWithBackup does tmp+rename with retry and keeps a
   // rolling .bak. Was Storage.writeFile() which had no atomicity -- a crash
@@ -1146,4 +1150,16 @@ bool CollectionsStore::writeToDiskNow_() const {
   gCollectionsSaveDeferred = !ok;  // clear on success; a real write failure also queues a retry
   if (ok) gCollectionsPendingWrite = false;
   return ok;
+}
+
+void CollectionsStore::loadLibraryStores() {
+  LibraryIndex::getInstance().begin();
+  SeriesIndex::getInstance().begin();
+  if (instance.collections.empty()) instance.begin();
+}
+
+void CollectionsStore::releaseLibraryStores() {
+  instance.releaseMemory();
+  SeriesIndex::getInstance().releaseMemory();
+  LibraryIndex::getInstance().releaseMemory();
 }

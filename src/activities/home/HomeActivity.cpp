@@ -39,6 +39,7 @@
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
+#include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
 
@@ -266,7 +267,12 @@ const char* savedItemsLabel(bool hasBookmarks, bool hasClippings) {
 void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks,
                          bool hasClippings) {
   items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
-  items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
+  // Crossblot: on Flow this entry opens the collection Bookshelf grid.
+  if (static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_FLOW) {
+    items.push({tr(STR_BOOKSHELF), Book, HomeMenuAction::RecentBooks});
+  } else {
+    items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
+  }
 
   if (hasOpdsServers) {
     items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
@@ -609,6 +615,8 @@ CarouselCache gCarouselCache;
 
 static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeRecentBooksCount,
               "kMaxCachedBooks must cover all carousel slots");
+static_assert(HomeActivity::kMaxCachedBooks >= LyraFlowMetrics::values.homeRecentBooksCount,
+              "kMaxCachedBooks must cover all Flow carousel slots");
 
 int HomeActivity::getMenuItemCount() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -868,6 +876,15 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
+  // Crossblot: Flow's collection shelf needs the library stores; other themes
+  // and the reader never load them.
+  if (flowThemeActive()) {
+    CollectionsStore::loadLibraryStores();
+    libraryStoresLoaded = true;
+    shelfFocus = ShelfFocus::None;
+    invalidateShelf();
+  }
+
   hasOpdsServers = OPDS_STORE.hasServers();
   const bool isCarouselTheme =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
@@ -1089,6 +1106,11 @@ void HomeActivity::updateHighlightedBookContext(const bool allowEpubLoad) {
 
 void HomeActivity::onExit() {
   Activity::onExit();
+
+  if (libraryStoresLoaded) {
+    CollectionsStore::releaseLibraryStores();
+    libraryStoresLoaded = false;
+  }
 
   carouselMenuTouchDownIndex = -1;
   freeCoverBuffer();
@@ -1799,6 +1821,10 @@ void HomeActivity::loop() {
   // interaction path above. On other themes, Back opens the most recent book.
   // Requiring a press observed on Home ignores the stale release that can
   // arrive after Back closed the previous activity.
+  if (flowThemeActive() && handleFlowInput(visibleBookCount, carouselMenuItemCount)) {
+    return;
+  }
+
   if (!carouselTouchOnly && !hasCarouselSwipe && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       backPressSeen && !recentBooks.empty()) {
     onContinueReading();
@@ -2274,8 +2300,16 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = pageWidth;
   coverRectH = homeCoverTileHeight;
 
+  // Flow decodes (bookCount + index) as "keep this book centred, no selection
+  // border", which holds the carousel still while the cursor is elsewhere.
+  const int flowBookCount = static_cast<int>(recentBooks.size());
+  const bool flowOffCarousel = flowThemeActive() && (shelfFocus != ShelfFocus::None || selectorIndex >= flowBookCount);
+  const int coverSelectorIndex =
+      flowOffCarousel && flowBookCount > 0
+          ? flowBookCount + std::clamp(lastCarouselBookIndex, 0, flowBookCount - 1)
+          : selectorIndex;
   GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, homeCoverTileHeight}, recentBooks,
-                          selectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                          coverSelectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this),
                           hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent);
 
@@ -2283,10 +2317,15 @@ void HomeActivity::render(RenderLock&&) {
   const int menuEndY = pageHeight - metrics.buttonHintsHeight;
   const int menuHeight = std::max(0, menuEndY - menuStartY);
 
+  if (flowThemeActive()) {
+    renderFlowShelf(pageWidth, pageHeight);
+  }
+
   const bool isCarouselTheme = usesCarouselNavigation();
   const int menuSelectedIndex = isCarouselTheme && mappedInput.hasTouchHardware()
                                     ? carouselMenuTouchDownIndex
-                                    : selectorIndex - getHomeMenuSelectionOffset(recentBooks);
+                                : shelfFocus != ShelfFocus::None ? -1
+                                                                 : selectorIndex - getHomeMenuSelectionOffset(recentBooks);
   GUI.drawButtonMenu(
       renderer, Rect{0, menuStartY, pageWidth, menuHeight}, static_cast<int>(menuItems.size()), menuSelectedIndex,
       [&menuItems](int index) { return menuItems[index].label; },
@@ -2370,7 +2409,13 @@ void HomeActivity::onContinueReading() {
   }
 }
 
-void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
+void HomeActivity::onRecentsOpen() {
+  if (flowThemeActive()) {
+    onBookshelfOpen();
+    return;
+  }
+  activityManager.goToRecentBooks();
+}
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 

@@ -41,9 +41,9 @@ class BookshelfGridActivity final : public Activity {
   // typically the currently-active collection -- so the icon-bar entry
   // becomes a "Bookshelf" grid over the user's collections.
   explicit BookshelfGridActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("RecentBooksGrid", renderer, mappedInput) {}
+      : Activity("BookshelfGrid", renderer, mappedInput) {}
   BookshelfGridActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string collectionId)
-      : Activity("RecentBooksGrid", renderer, mappedInput), collectionId_(std::move(collectionId)) {}
+      : Activity("BookshelfGrid", renderer, mappedInput), collectionId_(std::move(collectionId)) {}
 
   void onEnter() override;
   void onExit() override;

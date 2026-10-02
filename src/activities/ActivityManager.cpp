@@ -26,6 +26,7 @@
 #include "home/HomeActivity.h"
 #include "home/RecentBookProgress.h"
 #include "home/RecentBooksActivity.h"
+#include "home/BookshelfGridActivity.h"
 #include "home/RecentBooksGridActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/NearbyBookTransferActivity.h"
@@ -673,6 +674,10 @@ void ActivityManager::goToSettings(const bool dismissOnUpSwipe) {
 
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
+}
+
+void ActivityManager::goToBookshelf(std::string collectionId) {
+  replaceActivity(std::make_unique<BookshelfGridActivity>(renderer, mappedInput, std::move(collectionId)));
 }
 
 void ActivityManager::goToRecentBooks() {

@@ -577,6 +577,9 @@ void BookshelfGridActivity::applyLayoutFromSettings() {
 
 void BookshelfGridActivity::onEnter() {
   Activity::onEnter();
+  // Crossblot: Home releases the library stores on exit; reload them here.
+  CollectionsStore::loadLibraryStores();
+  if (collectionId_.empty()) collectionId_ = CollectionsStore::getInstance().getActiveId();
   // CrumBLE #133: re-read SETTINGS.bookshelfLayout every entry. The
   // user toggles the Layout row from BookshelfPickerActivity, then
   // returns here -- we want the new column/cell sizes to take effect
@@ -608,6 +611,7 @@ void BookshelfGridActivity::onEnter() {
 
 void BookshelfGridActivity::onExit() {
   Activity::onExit();
+  CollectionsStore::releaseLibraryStores();
   recentBooks.clear();
   freeGridSnapshot();
   bookMetaCache_.clear();

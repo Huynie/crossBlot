@@ -123,7 +123,10 @@ class LibraryIndex {
     std::vector<char>().swap(pathPool);
     std::vector<char>().swap(authorKeyPool);
     jsonLoaded = false;
-    walkPerformed = false;
+    // Crossblot: keep walkPerformed. The on-disk JSON already holds this
+    // session's walk, so the next ensureWalked() just reloads it instead of
+    // rescanning the whole SD every time Home is re-entered. SD changes
+    // (file transfer, OPDS downloads) call markStale() to force a rescan.
   }
 
   // Read accessors. Both produce a fresh vector copy — the underlying

@@ -238,7 +238,10 @@ void LibraryIndex::begin() {
 }
 
 void LibraryIndex::ensureWalked(const std::function<void(int)>& progress) {
-  if (walkPerformed) return;
+  if (walkPerformed) {
+    begin();  // reload JSON if releaseMemory() dropped it; no-op otherwise
+    return;
+  }
   // Restore the persisted index (with each book's firstSeen) before walking.
   // Normally a no-op (begin() ran at boot), but after releaseMemory() freed the
   // in-RAM vector this reloads it from JSON so the rescan below sees a populated
