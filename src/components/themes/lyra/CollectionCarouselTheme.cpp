@@ -25,7 +25,7 @@ constexpr int kTitleLines = 2;
 constexpr int kArrowSize = 7;
 
 struct Layout {
-  int headerY, headerLineH;
+  int headerY, headerLineH, counterY;
   int centerX, centerY, centerW, centerH;
   int nearW, nearInnerH, nearOuterH, nearY;
   int farW, farInnerH, farOuterH, farY;
@@ -38,10 +38,11 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
   Layout l{};
   const int pageWidth = rect.width;
   l.headerLineH = renderer.getLineHeight(UI_12_FONT_ID);
-  l.headerY = rect.y + 4;
+  l.headerY = rect.y;
+  l.counterY = l.headerY + l.headerLineH;
   CollectionCarouselTheme::coverSize(renderer, l.centerW, l.centerH);
   l.centerX = (pageWidth - l.centerW) / 2;
-  l.centerY = l.headerY + l.headerLineH + 18;
+  l.centerY = l.counterY + renderer.getLineHeight(SMALL_FONT_ID) + 12;
 
   // The side covers share the space beside the (large) centre cover: the near
   // cover tucks a quarter of its width under the centre, the far cover runs
@@ -210,6 +211,12 @@ void CollectionCarouselTheme::drawCollectionCarousel(GfxRenderer& renderer, cons
     drawArrow(renderer, (pageWidth + nameW) / 2 + 10 + kArrowSize, midY, false);
   }
 
+  if (itemCount > 0 && centerIndex >= 0) {
+    char counter[32];
+    snprintf(counter, sizeof(counter), "%d of %d", centerIndex + 1, itemCount);
+    drawCenteredText(renderer, SMALL_FONT_ID, pageWidth, l.counterY, counter, EpdFontFamily::REGULAR);
+  }
+
   if (itemCount <= 0 || centerIndex < 0) {
     renderer.drawRoundedRect(l.centerX, l.centerY, l.centerW, l.centerH, 1, kCornerRadius, true);
     const auto lines = renderer.wrappedText(UI_10_FONT_ID, emptyMessage != nullptr ? emptyMessage : "",
@@ -268,9 +275,5 @@ void CollectionCarouselTheme::drawCollectionCarousel(GfxRenderer& renderer, cons
   if (!center.author.empty()) {
     const std::string author = renderer.truncatedText(UI_10_FONT_ID, center.author.c_str(), l.textW);
     drawCenteredText(renderer, UI_10_FONT_ID, pageWidth, y, author.c_str(), EpdFontFamily::REGULAR);
-    y += renderer.getLineHeight(UI_10_FONT_ID) + 4;
   }
-  char counter[32];
-  snprintf(counter, sizeof(counter), "%d of %d", centerIndex + 1, itemCount);
-  drawCenteredText(renderer, SMALL_FONT_ID, pageWidth, y, counter, EpdFontFamily::REGULAR);
 }
