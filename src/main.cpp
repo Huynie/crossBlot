@@ -91,6 +91,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/boot_sleep/ImageFolderIndex.h"
+#include "activities/boot_sleep/SleepActivity.h"
 #include "activities/home/BookActions.h"
 #include "activities/reader/KOReaderSyncActivity.h"
 #include "activities/reader/ReadingStatsUtils.h"
@@ -1027,6 +1028,26 @@ bool shouldClearX4WakeGhosting() {
 // been released during boot. The write is skipped when the value is unchanged.
 constexpr char WAKE_NVS_NAMESPACE[] = "crosspoint";
 constexpr char WAKE_SHORT_PRESS_KEY[] = "wakeShortPr";
+// Crossblot: tap-to-cycle sleep images is decided before SD is mounted too.
+constexpr char WAKE_CYCLE_TAP_KEY[] = "wakeCycleTap";
+
+bool sleepCycleEnabledInSettings() {
+  return SETTINGS.cycleScreensaverOnTap != 0 &&
+         SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+}
+
+bool readWakeCycleTapFromNvs() {
+#ifdef SIMULATOR
+  return false;
+#else
+  nvs_handle_t handle;
+  if (nvs_open(WAKE_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return false;
+  uint8_t value = 0;
+  const esp_err_t result = nvs_get_u8(handle, WAKE_CYCLE_TAP_KEY, &value);
+  nvs_close(handle);
+  return result == ESP_OK && value != 0;
+#endif
+}
 
 bool readWakeShortPressFromNvs() {
 #ifdef SIMULATOR
@@ -1048,13 +1069,132 @@ void mirrorWakeShortPressToNvs() {
   if (nvs_open(WAKE_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) return;
   uint8_t current = 0;
   const bool hasCurrent = nvs_get_u8(handle, WAKE_SHORT_PRESS_KEY, &current) == ESP_OK;
+  bool dirty = false;
   if (!hasCurrent || current != expected) {
     nvs_set_u8(handle, WAKE_SHORT_PRESS_KEY, expected);
-    nvs_commit(handle);
+    dirty = true;
   }
+  const uint8_t expectedCycle = sleepCycleEnabledInSettings() ? 1 : 0;
+  uint8_t currentCycle = 0;
+  if (nvs_get_u8(handle, WAKE_CYCLE_TAP_KEY, &currentCycle) != ESP_OK || currentCycle != expectedCycle) {
+    nvs_set_u8(handle, WAKE_CYCLE_TAP_KEY, expectedCycle);
+    dirty = true;
+  }
+  if (dirty) nvs_commit(handle);
   nvs_close(handle);
 #endif
 }
+
+// ---- Crossblot: tap-to-cycle sleep images (ported from CrumBLE) ----------
+// A power press shorter than this while asleep cycles the image; anything
+// longer falls through to the normal wake path.
+constexpr unsigned long SCREENSAVER_TAP_MAX_MS = 200;
+
+#ifndef SIMULATOR
+// Raw GPIO, not InputManager: its debounce is too slow to see a short tap.
+bool detectScreensaverCycleTap() {
+  const unsigned long start = millis();
+  while (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW && (millis() - start) < SCREENSAVER_TAP_MAX_MS) {
+    delay(5);
+  }
+  const bool released = digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH;
+  LOG_INF("MAIN", "Cycle tap detect: %s (took %lu ms)", released ? "TAP" : "HELD", millis() - start);
+  return released;
+}
+
+// Set by an ISR while a sleep image is being drawn, so taps that land during
+// the (uninterruptible) e-ink refresh are not lost.
+volatile bool sleepEntryTapPending = false;
+void IRAM_ATTR onSleepEntryPowerEdge() { sleepEntryTapPending = true; }
+
+void armSleepEntryTapIsr() {
+  sleepEntryTapPending = false;
+  attachInterrupt(InputManager::POWER_BUTTON_PIN, onSleepEntryPowerEdge, FALLING);
+}
+
+void disarmSleepEntryTapIsr() {
+  detachInterrupt(InputManager::POWER_BUTTON_PIN);
+  sleepEntryTapPending = false;
+}
+
+// A press caught by the ISR whose release has already happened.
+bool consumeCompletedSleepEntryTap() {
+  if (!sleepEntryTapPending) return false;
+  if (digitalRead(InputManager::POWER_BUTTON_PIN) != HIGH) return false;
+  sleepEntryTapPending = false;
+  return true;
+}
+
+// Waits for the panel to settle while watching for another tap. Returns true
+// on a tap; a long hold is left for the GPIO wake to pick up after sleeping.
+bool pollForCycleTapDuringSettle(const uint16_t settleMs) {
+  const unsigned long start = millis();
+  while (millis() - start < settleMs) {
+    if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+      const unsigned long pressStart = millis();
+      while (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW && (millis() - pressStart) < SCREENSAVER_TAP_MAX_MS) {
+        delay(5);
+      }
+      const bool tapped = digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH;
+      noInterrupts();
+      sleepEntryTapPending = false;
+      interrupts();
+      return tapped;
+    }
+    delay(10);
+  }
+  return false;
+}
+#else
+bool detectScreensaverCycleTap() { return false; }
+void armSleepEntryTapIsr() {}
+void disarmSleepEntryTapIsr() {}
+bool consumeCompletedSleepEntryTap() { return false; }
+bool pollForCycleTapDuringSettle(const uint16_t settleMs) {
+  delay(settleMs);
+  return false;
+}
+#endif
+
+// Keep drawing new images for as long as the user keeps tapping.
+void cycleWhileTapping() {
+  armSleepEntryTapIsr();
+  while (consumeCompletedSleepEntryTap() || pollForCycleTapDuringSettle(POST_SLEEP_SCREEN_SETTLE_MS)) {
+    SleepActivity::cycleScreensaverFromDeepSleep(renderer, mappedInputManager);
+  }
+  disarmSleepEntryTapIsr();
+}
+
+// Boot path for a tap while asleep: draw the next image and go straight back
+// to deep sleep without starting the UI.
+[[noreturn]] void cycleScreensaverThenDeepSleep() {
+  if (Storage.begin()) {
+    SETTINGS.loadFromFile();
+    APP_STATE.loadFromFile();
+#ifdef SIMULATOR
+    display.begin();
+#else
+    display.begin(true);
+#endif
+    renderer.begin();
+    display.setInverted(SETTINGS.screenInverted != 0);
+
+    armSleepEntryTapIsr();
+    SleepActivity::cycleScreensaverFromDeepSleep(renderer, mappedInputManager);
+    disarmSleepEntryTapIsr();
+    cycleWhileTapping();
+    Storage.shutdown();
+  }
+
+  putTiltSensorToSleepForDeepSleep();
+  display.deepSleep();
+  LOG_DBG("MAIN", "Screensaver cycled, re-entering deep sleep");
+  powerManager.startDeepSleep(gpio);
+  while (true) {
+    delay(1000);  // startDeepSleep does not return on hardware
+  }
+}
+// --------------------------------------------------------------------------
 
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout) {
@@ -1074,6 +1214,8 @@ void enterDeepSleep(bool fromTimeout) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
+  const bool cycleOnTap = !isQuickResumeSleep && sleepCycleEnabledInSettings();
+  if (cycleOnTap) armSleepEntryTapIsr();
   activityManager.goToSleep(fromTimeout);
 
   if (isQuickResumeSleep) {
@@ -1083,7 +1225,12 @@ void enterDeepSleep(bool fromTimeout) {
       // A stale Quick Resume frame must not replace the selected sleep screen during wake.
       Storage.remove(SLEEP_FRAME_FILE);
     }
-    delay(POST_SLEEP_SCREEN_SETTLE_MS);
+    if (cycleOnTap) {
+      // Taps during the sleep image draw or settle cycle to the next image.
+      cycleWhileTapping();
+    } else {
+      delay(POST_SLEEP_SCREEN_SETTLE_MS);
+    }
   }
 
   if (halClock.isAvailable() && SETTINGS.autoBackupStats != 0) {
@@ -1243,6 +1390,10 @@ void setup() {
   const auto wakeupReason = gpio.getWakeupReason();
 #ifndef SIMULATOR
   const bool shortPressWakes = readWakeShortPressFromNvs();
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && readWakeCycleTapFromNvs() &&
+      detectScreensaverCycleTap()) {
+    cycleScreensaverThenDeepSleep();
+  }
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !gpio.verifyPowerButtonWakeup(shortPressWakes)) {
     LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
     powerManager.startDeepSleep(gpio);

@@ -18,9 +18,15 @@ class SleepActivity final : public Activity {
         sleepPopupOrientation(sleepPopupOrientation) {}
   void onEnter() override;
 
+  // Crossblot (from CrumBLE): draw the next random custom sleep image without
+  // booting the UI. Used by the power-tap cycle path in main.cpp. Returns
+  // false when no custom image could be drawn.
+  static bool cycleScreensaverFromDeepSleep(GfxRenderer& renderer, MappedInputManager& mappedInput);
+
  private:
   void renderDefaultSleepScreen() const;
   void renderCustomSleepScreen() const;
+  bool renderCycledSleepScreen() const;
   void renderCoverSleepScreen() const;
   void renderReadingStatsSleepScreen() const;
   void renderMinimalSleepScreen() const;

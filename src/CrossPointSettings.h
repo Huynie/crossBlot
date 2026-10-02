@@ -421,6 +421,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t sleepScreenCoverMode = FIT;
   // Sleep screen cover filter
   uint8_t sleepScreenCoverFilter = NO_FILTER;
+  // Crossblot (from CrumBLE): while asleep with a Custom sleep screen, a brief
+  // power tap shows the next sleep image and goes straight back to sleep.
+  uint8_t cycleScreensaverOnTap = 1;
   // Status bar settings (statusBar retained for migration only)
   uint8_t statusBar = FULL;
   uint8_t statusBarChapterPageCount = 1;

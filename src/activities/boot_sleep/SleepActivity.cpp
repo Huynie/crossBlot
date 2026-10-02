@@ -635,6 +635,33 @@ void SleepActivity::renderCustomSleepScreen() const {
   renderDefaultSleepScreen();
 }
 
+bool SleepActivity::cycleScreensaverFromDeepSleep(GfxRenderer& renderer, MappedInputManager& mappedInput) {
+  const SleepActivity sleepActivity(renderer, mappedInput, false);
+  return sleepActivity.renderCycledSleepScreen();
+}
+
+// Skips the pinned image: cycling should always move to a different picture.
+bool SleepActivity::renderCycledSleepScreen() const {
+  SleepImageSelection selection;
+  if (!selectRandomSleepImage(SleepImageMode::Custom, selection, false, true)) {
+    LOG_INF("SLP", "Cycle skipped: no custom sleep image available");
+    return false;
+  }
+
+  FsFile file;
+  if (!Storage.openFileForRead("SLP", selection.path, file)) {
+    LOG_ERR("SLP", "Failed to open cycled sleep image: %s", selection.path.c_str());
+    return false;
+  }
+  LOG_INF("SLP", "Cycling sleep image to: %s", selection.path.c_str());
+  Bitmap bitmap(file, true,
+                renderer.supportsAbsoluteGrayscale() &&
+                    SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
+  const bool success = bitmap.parseHeaders() == BmpReaderError::Ok && renderBitmapSleepScreen(bitmap);
+  file.close();
+  return success;
+}
+
 // Sleep screens paint with a single HALF refresh (stock parity): the OEM X4
 // firmware's only clean refresh in normal operation is the single-pass 0xD7
 // sequence, used once for the sleep image. It never runs the multi-flash GC
