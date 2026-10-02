@@ -28,6 +28,7 @@ enum class FileBrowserAction : int {
   PinBootFavorite = 16,
   UnpinBootFavorite = 17,
   Rename = 18,
+  AddToCollection = 19,  // Crossblot: CrumBLE collections picker
 };
 
 class FileBrowserActionActivity final : public Activity {

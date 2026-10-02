@@ -168,6 +168,13 @@ ReadingStatsDate readDate(const uint8_t* data, const int offset) {
 
 }  // namespace
 
+bool BookReadingStats::exists(const std::string& cachePath) {
+  FsFile f;
+  if (!openStatsFileForRead(cachePath, f)) return false;
+  f.close();
+  return true;
+}
+
 BookReadingStats BookReadingStats::load(const std::string& cachePath) {
   BookReadingStats stats;
   FsFile f;

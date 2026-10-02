@@ -464,6 +464,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["frontButtonLeft"] = frontButtonLeft;
   doc["frontButtonRight"] = frontButtonRight;
   doc["readerFrontButtonsEnabled"] = readerFrontButtonsEnabled;
+  doc["showRecentlyAddedCollection"] = showRecentlyAddedCollection;
+  doc["showAllBooksCollection"] = showAllBooksCollection;
+  doc["showFinishedCollection"] = showFinishedCollection;
+  doc["showNewCollection"] = showNewCollection;
+  doc["bookshelfLayout"] = bookshelfLayout;
+  doc["bookshelfTitlePlacement"] = bookshelfTitlePlacement;
   doc["readerFrontButtonBack"] = readerFrontButtonBack;
   doc["readerFrontButtonConfirm"] = readerFrontButtonConfirm;
   doc["readerFrontButtonLeft"] = readerFrontButtonLeft;
@@ -706,6 +712,15 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc, bool importingCrossPoint
                            FRONT_HW_RIGHT);
   validateFrontButtonMapping(*this);
   readerFrontButtonsEnabled = clamp(doc["readerFrontButtonsEnabled"] | static_cast<uint8_t>(0), 2, 0);
+  showRecentlyAddedCollection = clamp(doc["showRecentlyAddedCollection"] | static_cast<uint8_t>(0), 2, 0);
+  showAllBooksCollection = clamp(doc["showAllBooksCollection"] | static_cast<uint8_t>(0), 2, 0);
+  showFinishedCollection = clamp(doc["showFinishedCollection"] | static_cast<uint8_t>(0), 2, 0);
+  showNewCollection = clamp(doc["showNewCollection"] | static_cast<uint8_t>(0), 2, 0);
+  bookshelfLayout = clamp(doc["bookshelfLayout"] | static_cast<uint8_t>(BOOKSHELF_LAYOUT_4X4), BOOKSHELF_LAYOUT_COUNT,
+                          BOOKSHELF_LAYOUT_4X4);
+  bookshelfTitlePlacement =
+      clamp(doc["bookshelfTitlePlacement"] | static_cast<uint8_t>(BOOKSHELF_TITLE_PLACEMENT_BOTTOM),
+            BOOKSHELF_TITLE_PLACEMENT_COUNT, BOOKSHELF_TITLE_PLACEMENT_BOTTOM);
   readerFrontButtonBack = clamp(doc["readerFrontButtonBack"] | static_cast<uint8_t>(FRONT_HW_BACK),
                                 FRONT_BUTTON_HARDWARE_COUNT, FRONT_HW_BACK);
   readerFrontButtonConfirm = clamp(doc["readerFrontButtonConfirm"] | static_cast<uint8_t>(FRONT_HW_CONFIRM),

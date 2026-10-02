@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -124,11 +125,26 @@ struct ClippingJumpResult {
   bool settingsChanged = false;
 };
 
+// Crossblot (from CrumBLE collections): picked index from ChoicePrompt /
+// BookshelfPicker, and the chosen order from RearrangeCollections.
+struct ChoicePromptResult {
+  int choice = -1;
+};
+
+struct SortPickerResult {
+  int sortMode = 0;  // CollectionsStore sort mode chosen in SortPickerActivity
+};
+
+struct RearrangeCollectionsResult {
+  std::vector<std::string> orderedIds;
+};
+
 using ResultVariant =
     std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, IntervalResult,
                  OptionSelectionResult, PageResult, NetworkModeResult, FootnoteResult, BookmarkResult,
                  FileBrowserActionResult, FilePathResult, WordResult, ReadingStatsResult, ClippingResult,
-                 DictionaryClippingRequest, ClippingJumpResult, FrontlightPanelResult>;
+                 DictionaryClippingRequest, ClippingJumpResult, FrontlightPanelResult, ChoicePromptResult,
+                 RearrangeCollectionsResult, SortPickerResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

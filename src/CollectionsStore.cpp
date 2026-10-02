@@ -1,0 +1,1149 @@
+#include "CollectionsStore.h"
+
+#include <Arduino.h>  // millis() for createCollection
+#include <ArduinoJson.h>
+#include <FsHelpers.h>
+#include <HalStorage.h>
+#include <Logging.h>
+
+#include <algorithm>
+#include <unordered_map>
+
+#include "CrossPointSettings.h"
+#include "LibraryIndex.h"
+#include "RecentBooksStore.h"
+#include "SeriesIndex.h"
+#include "activities/reader/BookReadingStats.h"
+
+namespace {
+// Crossblot: CrumBLE added these to HalStorage; kept local to collections.
+// Write tmp, move the current file to .bak, then promote tmp, so a crash
+// mid-save never leaves collections.json empty.
+bool writeFileWithBackup(const char* path, const String& content) {
+  if (!path || !*path) return false;
+  const String tmpPath = String(path) + ".tmp";
+  const String bakPath = String(path) + ".bak";
+  auto attempt = [&]() -> bool {
+    if (!Storage.writeFile(tmpPath.c_str(), content)) return false;
+    if (Storage.exists(path)) {
+      Storage.remove(bakPath.c_str());
+      if (!Storage.rename(path, bakPath.c_str())) return false;
+    }
+    if (!Storage.rename(tmpPath.c_str(), path)) {
+      Storage.rename(bakPath.c_str(), path);
+      return false;
+    }
+    return true;
+  };
+  if (attempt()) return true;
+  delay(100);
+  return attempt();
+}
+
+String readFileWithFallback(const char* path, bool& outFromBackup) {
+  outFromBackup = false;
+  if (!path || !*path) return String();
+  String primary = Storage.readFile(path);
+  if (!primary.isEmpty()) return primary;
+  String bak = Storage.readFile((String(path) + ".bak").c_str());
+  if (!bak.isEmpty()) {
+    LOG_INF("COLL", "Using backup for %s", path);
+    outFromBackup = true;
+  }
+  return bak;
+}
+}  // namespace
+#include <Epub.h>
+
+#include <unordered_set>
+
+namespace {
+constexpr char COLLECTIONS_FILE[] = "/.crosspoint/collections.json";
+constexpr uint8_t COLLECTIONS_FILE_VERSION = 1;
+}  // namespace
+
+CollectionsStore CollectionsStore::instance;
+
+void CollectionsStore::begin() {
+  if (!loadFromFile()) {
+    LOG_DBG("CLN", "No collections.json found, seeding defaults");
+    collections.clear();
+    seedDefaults();
+    saveToFile();
+  }
+  // Defensive: even after a successful load, make sure Favorites still
+  // exists. A user could have hand-edited the JSON and removed it.
+  if (findCollection(FAVORITES_ID) == nullptr) {
+    seedDefaults();
+    saveToFile();
+  }
+  // Always re-pin the virtual collections at the end of the list so they
+  // appear AFTER user-created ones in the L/R cycle. We re-create them
+  // every begin() because they're not persisted (their book lists come
+  // from LibraryIndex at access time, not from collections.json).
+  auto seedVirtual = [this](const char* id, const char* name) {
+    if (findCollection(id) == nullptr) {
+      Collection v;
+      v.id = id;
+      v.name = name;
+      v.isVirtual = true;
+      collections.push_back(std::move(v));
+    }
+  };
+  // CrumBLE: the index-backed virtuals are opt-in (avoids a boot-time SD walk).
+  // Only seed them when the user has turned them on; toggling at runtime adds /
+  // removes them via setVirtualCollectionVisible().
+  if (SETTINGS.showRecentlyAddedCollection) seedVirtual(RECENTLY_ADDED_ID, RECENTLY_ADDED_NAME);
+  if (SETTINGS.showAllBooksCollection) seedVirtual(ALL_BOOKS_ID, ALL_BOOKS_NAME);
+  if (SETTINGS.showFinishedCollection) seedVirtual(FINISHED_ID, FINISHED_NAME);
+  if (SETTINGS.showNewCollection) seedVirtual(NEW_ID, NEW_NAME);
+  // CrumBLE: apply the user's saved L/R cycle order (if any). Loaded by
+  // loadFromFile() into displayOrderIds_; honoring it here means virtuals
+  // get their rearrange position back even though their entries themselves
+  // are reseeded each begin().
+  applyDisplayOrder();
+
+  if (activeId.empty() || findCollection(activeId) == nullptr) {
+    activeId = FAVORITES_ID;
+  }
+}
+
+void CollectionsStore::setVirtualCollectionVisible(const char* id, const char* name, bool visible) {
+  const bool present = findCollection(id) != nullptr;
+  if (visible && !present) {
+    Collection v;
+    v.id = id;
+    v.name = name;
+    v.isVirtual = true;
+    collections.push_back(std::move(v));
+    // Re-apply the saved display order so a previously-rearranged virtual
+    // returns to its saved slot rather than always landing at the end.
+    applyDisplayOrder();
+  } else if (!visible && present) {
+    collections.erase(std::remove_if(collections.begin(), collections.end(),
+                                     [&](const Collection& c) { return c.id == id; }),
+                      collections.end());
+    // If the hidden collection was active, fall back to Favorites so Home
+    // doesn't point at a collection that no longer exists.
+    if (activeId == id) activeId = FAVORITES_ID;
+  }
+}
+
+void CollectionsStore::seedDefaults() {
+  if (findCollection(FAVORITES_ID) == nullptr) {
+    collections.push_back({FAVORITES_ID, FAVORITES_NAME, {}});
+  }
+  if (activeId.empty()) {
+    activeId = FAVORITES_ID;
+  }
+}
+
+const Collection* CollectionsStore::findCollection(const std::string& collectionId) const {
+  for (const auto& c : collections) {
+    if (c.id == collectionId) return &c;
+  }
+  return nullptr;
+}
+
+bool CollectionsStore::isBookInCollection(const std::string& collectionId, const std::string& bookPath) const {
+  const Collection* c = findCollection(collectionId);
+  if (!c) return false;
+  // For user collections we have an exact in-memory list. For virtuals
+  // we'd have to scan LibraryIndex, which is expensive — and the picker
+  // (the only realistic caller) hides virtuals anyway. So virtual
+  // membership lookup returns false here, which is the safe default.
+  if (c->isVirtual) return false;
+  return std::find(c->bookPaths.begin(), c->bookPaths.end(), bookPath) != c->bookPaths.end();
+}
+
+namespace {
+// Case-insensitive less-than over filenames (basename). Used by both
+// TitleAlpha sort here and the LibraryIndex's All-Books default.
+bool basenameLess(const std::string& a, const std::string& b) {
+  const size_t sa = a.find_last_of('/');
+  const size_t sb = b.find_last_of('/');
+  const char* aBase = a.c_str() + (sa == std::string::npos ? 0 : sa + 1);
+  const char* bBase = b.c_str() + (sb == std::string::npos ? 0 : sb + 1);
+  while (*aBase && *bBase) {
+    const char ca = static_cast<char>(std::tolower(static_cast<unsigned char>(*aBase)));
+    const char cb = static_cast<char>(std::tolower(static_cast<unsigned char>(*bBase)));
+    if (ca != cb) return ca < cb;
+    ++aBase;
+    ++bBase;
+  }
+  return *aBase == 0 && *bBase != 0;
+}
+
+// CrumBLE: heuristic "last name" extraction from a free-form author string.
+// Handles the two common dc:creator formats:
+//   "Last, First"  -> "Last"      (comma form)
+//   "First Last"   -> "Last"      (space form, last whitespace-token wins)
+//   "J. R. R. Tolkien" -> "Tolkien" (last whitespace-token still works)
+//   "Plato"        -> "Plato"     (single-word author)
+// Returns lowercase for case-insensitive comparison. Returns an empty
+// string for empty input -- caller can use that as a "sort to end" sentinel.
+std::string lastNameLower(const std::string& author) {
+  // Trim leading/trailing whitespace.
+  size_t l = author.find_first_not_of(" \t\r\n");
+  if (l == std::string::npos) return {};
+  size_t r = author.find_last_not_of(" \t\r\n");
+  std::string s = author.substr(l, r - l + 1);
+
+  // v18.9.9.220: mirror the LibraryIndex fix -- split on ';' first
+  // (multi-author separator) so we only look at the primary author.
+  const size_t semi = s.find(';');
+  if (semi != std::string::npos) {
+    s = s.substr(0, semi);
+    size_t rr = s.find_last_not_of(" \t\r\n");
+    if (rr != std::string::npos) s.resize(rr + 1); else s.clear();
+  }
+
+  // "Last, First" form -- everything before the first comma.
+  const size_t comma = s.find(',');
+  if (comma != std::string::npos) {
+    s = s.substr(0, comma);
+    // Re-trim in case the comma had leading spaces.
+    size_t rr = s.find_last_not_of(" \t\r\n");
+    if (rr != std::string::npos) s.resize(rr + 1);
+  } else {
+    // "First Last" form -- last whitespace-separated token.
+    const size_t sp = s.find_last_of(" \t");
+    if (sp != std::string::npos) s = s.substr(sp + 1);
+  }
+
+  // v18.9.9.220: strip trailing punctuation. See LibraryIndex.cpp.
+  while (!s.empty()) {
+    const char c = s.back();
+    if (c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?') s.pop_back();
+    else break;
+  }
+
+  // Lowercase for case-insensitive sort.
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return s;
+}
+
+void applySort(std::vector<std::string>& paths, CollectionSort mode) {
+  switch (mode) {
+    case CollectionSort::Manual:
+      // No-op — caller already produced the manual order (user
+      // collection's stored bookPaths, or virtual's natural order).
+      return;
+    case CollectionSort::TitleAlpha:
+      std::sort(paths.begin(), paths.end(), basenameLess);
+      return;
+    case CollectionSort::TitleAlphaDesc:
+      std::sort(paths.begin(), paths.end(), [](const std::string& a, const std::string& b) { return basenameLess(b, a); });
+      return;
+    case CollectionSort::DateAddedDesc:
+    case CollectionSort::DateAddedAsc: {
+      // Cache lookups: for each path, resolve firstSeenMillis once
+      // and stash into a parallel vector. Sort indices, then permute
+      // paths. Avoids O(N^2) LibraryIndex lookups inside the
+      // comparator.
+      const auto& idx = LibraryIndex::getInstance();
+      std::vector<uint64_t> times(paths.size());
+      for (size_t i = 0; i < paths.size(); ++i) times[i] = idx.getFirstSeen(paths[i]);
+      std::vector<size_t> order(paths.size());
+      for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+      const bool desc = mode == CollectionSort::DateAddedDesc;
+      std::sort(order.begin(), order.end(),
+                [&](size_t a, size_t b) { return desc ? times[a] > times[b] : times[a] < times[b]; });
+      std::vector<std::string> sorted;
+      sorted.reserve(paths.size());
+      for (size_t i : order) sorted.push_back(std::move(paths[i]));
+      paths = std::move(sorted);
+      return;
+    }
+    case CollectionSort::DateLastReadDesc: {
+      // Build a map of path → position in RECENT_BOOKS (0 = most
+      // recently read). Books not in RECENT_BOOKS get a sentinel
+      // position past the end so they sort to the back of the list.
+      // Result: most-recently-opened books bubble to the top, never-
+      // opened books form a tail at the bottom (relative order among
+      // tail is the input order).
+      const auto& recents = RECENT_BOOKS.getBooks();
+      std::unordered_map<std::string, size_t> posByPath;
+      posByPath.reserve(recents.size());
+      for (size_t i = 0; i < recents.size(); ++i) posByPath[recents[i].path] = i;
+      const size_t sentinel = recents.size() + 1;
+      std::vector<size_t> rank(paths.size(), sentinel);
+      for (size_t i = 0; i < paths.size(); ++i) {
+        auto it = posByPath.find(paths[i]);
+        if (it != posByPath.end()) rank[i] = it->second;
+      }
+      std::vector<size_t> order(paths.size());
+      for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+      // Stable sort by rank ASC (so RECENT_BOOKS[0] comes first). Ties
+      // (both unread) preserve input order.
+      std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return rank[a] < rank[b]; });
+      std::vector<std::string> sorted;
+      sorted.reserve(paths.size());
+      for (size_t i : order) sorted.push_back(std::move(paths[i]));
+      paths = std::move(sorted);
+      return;
+    }
+    case CollectionSort::AuthorAlpha:
+    case CollectionSort::AuthorAlphaDesc: {
+      // Per-path: load the EPUB's cached metadata (no full index build) and
+      // extract the author's heuristic last name. Books with no metadata
+      // cache yet OR no author tag end up with an empty key and sort to
+      // the END of the list regardless of asc/desc, so they don't litter
+      // the top of an A-Z view. .xtc / .txt currently have no author
+      // metadata path here -- they also fall to the end.
+      //
+      // CrumBLE 4.2.1 hotfix: the per-book load is the slow + heap-heavy
+      // step (~10-50 ms each, allocates BookMetadataCache + CssParser +
+      // book.bin contents transiently). On large collections (All Books
+      // with 200+ books) the loop used to either:
+      //   (a) trip the IDLE-task watchdog (5 s default) because no yield
+      //       gives FreeRTOS scheduler a chance to run the IDLE task,
+      //       leading to panic + device reset, OR
+      //   (b) OOM-terminate when a particularly heavy book hit a
+      //       tight-heap state mid-loop (-fno-exceptions makes bad_alloc
+      //       a terminate call).
+      // Two guards address both: a maxAllocHeap pre-flight per book
+      // (skipping the load if heap is below 20 KB — book gets the same
+      // empty-key fallback as no-author books, sorts to the end), and
+      // a vTaskDelay(1) every kYieldEvery books (resets IDLE WDT and
+      // lets BT / WiFi tasks breathe). Worst-case overhead at the
+      // happy path: ~16 * 1 ms = ~16 ms per 256 books, negligible.
+      // CrumBLE 4.2.1 hotfix v3: read author keys from LibraryIndex's
+      // persisted cache instead of loading each Epub. populateAuthorKeysIfNeeded
+      // (called from ensureWalked) and EpubReaderActivity::onEnter together
+      // keep the cache filled, so this loop is O(N) hashed-string lookups
+      // with no per-iteration Epub::load -- the source of the previous
+      // hotfix's residual heap fragmentation. Books whose key isn't cached
+      // yet get an empty string here and sort to the end of the list,
+      // matching the v4.2.0 fallback behaviour. They self-heal on the next
+      // populateAuthorKeysIfNeeded pass.
+      const auto& libIdx = LibraryIndex::getInstance();
+      std::vector<std::string> keys(paths.size());
+      for (size_t i = 0; i < paths.size(); ++i) {
+        if (!FsHelpers::hasEpubExtension(paths[i])) continue;
+        keys[i] = std::string{libIdx.getAuthorKey(paths[i])};
+      }
+      std::vector<size_t> order(paths.size());
+      for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+      const bool desc = mode == CollectionSort::AuthorAlphaDesc;
+      std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        // Empty keys (no author / no metadata) always sort last regardless
+        // of direction.
+        const bool aEmpty = keys[a].empty();
+        const bool bEmpty = keys[b].empty();
+        if (aEmpty != bEmpty) return !aEmpty;
+        if (aEmpty) return false;  // both empty -- input order wins (stable)
+        return desc ? keys[a] > keys[b] : keys[a] < keys[b];
+      });
+      std::vector<std::string> sorted;
+      sorted.reserve(paths.size());
+      for (size_t i : order) sorted.push_back(std::move(paths[i]));
+      paths = std::move(sorted);
+      return;
+    }
+  }
+}
+}  // namespace
+
+std::vector<std::string> CollectionsStore::resolveBookPaths(const std::string& collectionId) const {
+  const Collection* c = findCollection(collectionId);
+  if (c == nullptr) return {};
+  std::vector<std::string> paths;
+  if (!c->isVirtual) {
+    paths = c->bookPaths;  // start from stored manual order.
+  } else {
+    // Virtual collection — pull live data from LibraryIndex. The first
+    // call this session lazily kicks off the SD walk; subsequent calls
+    // are in-memory.
+    LibraryIndex::getInstance().ensureWalked();
+    if (collectionId == RECENTLY_ADDED_ID) {
+      // Recently Added is INTRINSICALLY ordered by firstSeen DESC —
+      // user can't override this. Always return top-18 newest.
+      return LibraryIndex::getInstance().getRecentlyAddedPaths(18);
+    }
+    if (collectionId == ALL_BOOKS_ID) {
+      // Defaults to TitleAlpha (already sorted by getAllBookPaths()).
+      // The sortMode override lets user re-sort by Date Added if they
+      // prefer.
+      paths = LibraryIndex::getInstance().getAllBookPaths();
+    }
+    // CrumBLE: completion-derived virtuals. Both read each book's
+    // BookReadingStats once per session (cached in
+    // {finished,new}PathsCache_) and re-scan lazily after the next
+    // invalidateScannedVirtuals() call. We then apply a sensible default
+    // sort below (Unopened = newest first, Finished = newest finished first).
+    if (collectionId == FINISHED_ID) {
+      rebuildScannedVirtualsIfNeeded();
+      paths = finishedPathsCache_;
+    } else if (collectionId == NEW_ID) {
+      rebuildScannedVirtualsIfNeeded();
+      paths = newPathsCache_;
+    }
+  }
+  // Apply sort. For virtuals we synthesise a default that matches the
+  // collection's semantic intent unless the user explicitly picked something
+  // else (sortMode != Manual). For user collections, Manual preserves the
+  // stored insertion order.
+  CollectionSort effectiveMode = c->sortMode;
+  if (c->isVirtual && effectiveMode == CollectionSort::Manual) {
+    if (collectionId == NEW_ID) {
+      effectiveMode = CollectionSort::DateAddedDesc;  // newest unopened first
+    } else if (collectionId == FINISHED_ID) {
+      effectiveMode = CollectionSort::DateLastReadDesc;  // most recently finished first
+    } else if (collectionId == ALL_BOOKS_ID) {
+      effectiveMode = CollectionSort::TitleAlpha;  // alphabetic (existing default)
+    }
+    // RECENTLY_ADDED_ID returns early above; never reaches this path.
+  }
+  applySort(paths, effectiveMode);
+  return paths;
+}
+
+int CollectionsStore::countBooksInCollection(const std::string& collectionId) const {
+  const Collection* c = findCollection(collectionId);
+  if (c == nullptr) return 0;
+  if (!c->isVirtual) return static_cast<int>(c->bookPaths.size());
+  return static_cast<int>(resolveBookPaths(collectionId).size());
+}
+
+bool CollectionsStore::toggleBookInCollection(const std::string& collectionId, const std::string& bookPath) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.isVirtual) {
+      LOG_ERR("CLN", "Refusing to toggle membership on virtual collection: %s", collectionId.c_str());
+      return false;
+    }
+    auto it = std::find(c.bookPaths.begin(), c.bookPaths.end(), bookPath);
+    bool nowIn;
+    if (it != c.bookPaths.end()) {
+      c.bookPaths.erase(it);
+      nowIn = false;
+    } else {
+      c.bookPaths.push_back(bookPath);
+      nowIn = true;
+    }
+    saveToFile();
+    LOG_DBG("CLN", "%s %s in %s (size=%zu)", nowIn ? "Added" : "Removed", bookPath.c_str(), collectionId.c_str(),
+            c.bookPaths.size());
+    return nowIn;
+  }
+  LOG_ERR("CLN", "Toggle requested for unknown collection: %s", collectionId.c_str());
+  return false;
+}
+
+int CollectionsStore::addBooksToCollection(const std::string& collectionId, const std::vector<std::string>& bookPaths) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.isVirtual) {
+      LOG_ERR("CLN", "Refusing bulk-add on virtual collection: %s", collectionId.c_str());
+      return 0;
+    }
+    // Build a set of existing paths once so the membership test is O(1) per
+    // candidate instead of O(n) — folders with hundreds of books otherwise
+    // make this quadratic.
+    std::unordered_set<std::string> existing(c.bookPaths.begin(), c.bookPaths.end());
+    c.bookPaths.reserve(c.bookPaths.size() + bookPaths.size());
+    int added = 0;
+    for (const auto& path : bookPaths) {
+      if (path.empty()) continue;
+      if (existing.find(path) != existing.end()) continue;
+      c.bookPaths.push_back(path);
+      existing.insert(path);
+      ++added;
+    }
+    if (added > 0) {
+      saveToFile();
+      LOG_INF("CLN", "Bulk-added %d books to collection %s (now %zu)", added, collectionId.c_str(),
+              c.bookPaths.size());
+    }
+    return added;
+  }
+  LOG_ERR("CLN", "addBooksToCollection: unknown collection %s", collectionId.c_str());
+  return 0;
+}
+
+bool CollectionsStore::reorderBooksInCollection(const std::string& collectionId,
+                                                const std::vector<std::string>& newOrder) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.isVirtual) {
+      LOG_ERR("CLN", "Refusing reorder on virtual collection: %s", collectionId.c_str());
+      return false;
+    }
+    // Validate: newOrder must be a permutation of c.bookPaths (no adds/drops).
+    // Catches stale-list races -- e.g. user adds a book in another menu while
+    // the reorder activity was open. In that case we'd silently lose the new
+    // book on save; better to refuse and let the user re-open the reorder.
+    if (newOrder.size() != c.bookPaths.size()) {
+      LOG_ERR("CLN", "reorderBooks: size mismatch (%zu vs %zu) on %s", newOrder.size(),
+              c.bookPaths.size(), collectionId.c_str());
+      return false;
+    }
+    std::unordered_set<std::string> existing(c.bookPaths.begin(), c.bookPaths.end());
+    for (const auto& p : newOrder) {
+      if (existing.find(p) == existing.end()) {
+        LOG_ERR("CLN", "reorderBooks: path %s not in collection %s", p.c_str(), collectionId.c_str());
+        return false;
+      }
+    }
+    c.bookPaths = newOrder;
+    // Force Manual sort so the new order isn't immediately re-shuffled by
+    // whichever sort was active when the user opened the menu.
+    c.sortMode = CollectionSort::Manual;
+    saveToFile();
+    LOG_INF("CLN", "Reordered %zu books in %s, sort -> Manual", newOrder.size(), collectionId.c_str());
+    return true;
+  }
+  LOG_ERR("CLN", "reorderBooksInCollection: unknown collection %s", collectionId.c_str());
+  return false;
+}
+
+std::string CollectionsStore::disambiguateName(const std::string& name, const std::string& ignoreId) const {
+  if (name.empty()) return name;
+  auto isTaken = [&](const std::string& candidate) {
+    for (const auto& c : collections) {
+      if (!ignoreId.empty() && c.id == ignoreId) continue;
+      if (c.name == candidate) return true;
+    }
+    return false;
+  };
+  if (!isTaken(name)) return name;
+  // Append " (N)" with the smallest unused N >= 1. Bound the loop generously
+  // so a corrupted collections.json with thousands of dupes still terminates;
+  // realistically no user will breach single digits.
+  for (int n = 1; n < 1000; ++n) {
+    std::string candidate = name + " (" + std::to_string(n) + ")";
+    if (!isTaken(candidate)) return candidate;
+  }
+  // Pathological fallback: append a millis tag. Still unique vs. existing
+  // names, just ugly. Better than returning a known duplicate.
+  return name + " (" + std::to_string(millis()) + ")";
+}
+
+std::string CollectionsStore::createCollection(const std::string& name) {
+  if (name.empty()) {
+    LOG_ERR("CLN", "createCollection refused: empty name");
+    return {};
+  }
+  const std::string uniqueName = disambiguateName(name);
+  if (uniqueName != name) {
+    LOG_INF("CLN", "createCollection: '%s' already taken, using '%s'", name.c_str(), uniqueName.c_str());
+  }
+  // ID derived from millis() — guaranteed unique on any human-paced
+  // create cadence, and avoids needing a stable hash of the (possibly
+  // user-edited) name. Prefix "c_" so ids never collide with the seeded
+  // FAVORITES_ID (which is plain "favorites").
+  std::string id = "c_" + std::to_string(millis());
+  // Defensive: if two creates happen in the same millisecond (e.g. a
+  // batch import), suffix with the existing count to disambiguate.
+  while (findCollection(id) != nullptr) {
+    id += "_x";
+  }
+  Collection c;
+  c.id = id;
+  c.name = uniqueName;
+  collections.push_back(std::move(c));
+  saveToFile();
+  LOG_INF("CLN", "Created collection: %s (id=%s)", uniqueName.c_str(), id.c_str());
+  return id;
+}
+
+bool CollectionsStore::renameCollection(const std::string& collectionId, const std::string& newName) {
+  if (newName.empty()) {
+    LOG_ERR("CLN", "renameCollection refused: empty name for %s", collectionId.c_str());
+    return false;
+  }
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.isVirtual) {
+      LOG_ERR("CLN", "Refusing rename on virtual collection: %s", collectionId.c_str());
+      return false;
+    }
+    // Dedupe against every other collection (incl. virtuals) but ignore ourselves —
+    // renaming "Foo" to "Foo" must remain a no-op rather than bumping to "Foo (1)".
+    const std::string uniqueName = disambiguateName(newName, collectionId);
+    if (c.name == uniqueName) return true;  // no-op, treat as success.
+    LOG_INF("CLN", "Renaming collection %s: '%s' -> '%s'%s", collectionId.c_str(), c.name.c_str(), uniqueName.c_str(),
+            uniqueName != newName ? " (deduped)" : "");
+    c.name = uniqueName;
+    saveToFile();
+    return true;
+  }
+  LOG_ERR("CLN", "renameCollection: unknown collection %s", collectionId.c_str());
+  return false;
+}
+
+bool CollectionsStore::deleteCollection(const std::string& collectionId) {
+  // Refuse the seeded Favorites — it gets re-seeded on every begin()
+  // so deletion would be misleading (the collection would reappear on
+  // the next reboot with no books). Users who want an empty Favorites
+  // can just toggle every book out of it.
+  if (collectionId == FAVORITES_ID) {
+    LOG_ERR("CLN", "Refusing to delete the seeded Favorites collection");
+    return false;
+  }
+  auto it = std::find_if(collections.begin(), collections.end(),
+                         [&](const Collection& c) { return c.id == collectionId; });
+  if (it == collections.end()) {
+    LOG_ERR("CLN", "deleteCollection: unknown collection %s", collectionId.c_str());
+    return false;
+  }
+  if (it->isVirtual) {
+    LOG_ERR("CLN", "Refusing to delete virtual collection: %s", collectionId.c_str());
+    return false;
+  }
+  LOG_INF("CLN", "Deleting collection: %s (%s)", collectionId.c_str(), it->name.c_str());
+  collections.erase(it);
+  // If we just deleted the active collection, fall back to Favorites.
+  // findCollection covers the edge case where the entire JSON has been
+  // hand-edited away — seedDefaults will recreate Favorites on next
+  // begin().
+  if (activeId == collectionId) {
+    activeId = FAVORITES_ID;
+  }
+  saveToFile();
+  return true;
+}
+
+int CollectionsStore::removeBookFromAllCollections(const std::string& bookPath) {
+  int touched = 0;
+  for (auto& c : collections) {
+    auto it = std::find(c.bookPaths.begin(), c.bookPaths.end(), bookPath);
+    if (it != c.bookPaths.end()) {
+      c.bookPaths.erase(it);
+      touched++;
+    }
+  }
+  if (touched > 0) {
+    saveToFile();
+    LOG_DBG("CLN", "Removed %s from %d collection(s)", bookPath.c_str(), touched);
+  }
+  return touched;
+}
+
+void CollectionsStore::setSortMode(const std::string& collectionId, CollectionSort mode) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.isVirtual && mode == CollectionSort::Manual) {
+      LOG_ERR("CLN", "Refusing Manual sort on virtual collection: %s", collectionId.c_str());
+      return;
+    }
+    if (c.sortMode == mode) return;
+    c.sortMode = mode;
+    // Only persist for user collections — virtuals reseed every begin()
+    // and would lose their sortMode anyway. (Could persist a separate
+    // map in future if we wanted virtual-collection prefs to survive
+    // reboots; deferred.)
+    if (!c.isVirtual) saveToFile();
+    LOG_DBG("CLN", "Set sort mode for %s to %u", collectionId.c_str(), static_cast<unsigned>(mode));
+    return;
+  }
+  LOG_ERR("CLN", "setSortMode: unknown collection %s", collectionId.c_str());
+}
+
+void CollectionsStore::setCollapseSeries(const std::string& collectionId, bool on) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.collapseSeries == on) return;
+    c.collapseSeries = on;
+    if (!c.isVirtual) saveToFile();
+    LOG_DBG("CLN", "Set collapseSeries for %s to %d", collectionId.c_str(), on ? 1 : 0);
+    return;
+  }
+  LOG_ERR("CLN", "setCollapseSeries: unknown collection %s", collectionId.c_str());
+}
+
+void CollectionsStore::setTwoRowShelf(const std::string& collectionId, bool on) {
+  for (auto& c : collections) {
+    if (c.id != collectionId) continue;
+    if (c.twoRowShelf == on) return;
+    c.twoRowShelf = on;
+    // Same persistence policy as setSortMode/setCollapseSeries: only user
+    // collections survive a reboot. Virtuals reseed on begin() and their
+    // prefs aren't yet round-tripped through collections.json.
+    if (!c.isVirtual) saveToFile();
+    LOG_DBG("CLN", "Set twoRowShelf for %s to %d", collectionId.c_str(), on ? 1 : 0);
+    return;
+  }
+  LOG_ERR("CLN", "setTwoRowShelf: unknown collection %s", collectionId.c_str());
+}
+
+std::vector<ShelfEntry> CollectionsStore::resolveShelfEntries(const std::string& collectionId) const {
+  // CrumBLE 4.2.1: clear the heap-pressure flag at the START of every call
+  // so a stale "true" from a prior call can't poison the caller's retry
+  // logic. The flag flips back to true below if and only if the pre-flight
+  // refuses to build the shelf.
+  lastResolveHitHeapPressure_ = false;
+  const Collection* c = findCollection(collectionId);
+  if (c == nullptr) return {};
+  const std::vector<std::string> paths = resolveBookPaths(collectionId);
+
+  // CrumBLE 4.2.1 hotfix v3: gate the WHOLE function on a heap pre-flight,
+  // not just the series-collapse path. The fast path below still does ~3
+  // small heap allocations per ShelfEntry (firstPath string content,
+  // memberPaths vector buffer, memberPaths[0] string content) -- for a
+  // 31-book All Books that's ~93 sub-100-byte allocations, which fragment
+  // and eventually fail on a heap already squeezed to maxAlloc=2 KB. Field
+  // log showed exactly that pattern: my v2 pre-flight skipped series-
+  // collapse correctly, the fast path entered, allocations ran the heap
+  // down to 2 KB, then push_back triggered a bad_alloc → terminate.
+  //
+  // The required headroom scales with the input size: reserve(N) costs
+  // N * sizeof(ShelfEntry) bytes contiguous, plus ~100 bytes per iteration
+  // of cumulative loop allocations. Plus a generic 2 KB safety margin. If
+  // maxAllocHeap is below the computed need, return an empty vector --
+  // shelf renders empty for THIS frame, next render after the heap
+  // recovers retries from scratch (HomeActivity's shelfPathsCacheKey
+  // stays unmatched so the rebuild fires again, and an empty-result
+  // assignment doesn't poison its cache state).
+  const uint32_t curMaxAlloc = ESP.getMaxAllocHeap();
+  const uint32_t pathCount = static_cast<uint32_t>(paths.size());
+  // CrumBLE 4.5.4: the old single-threshold (~240 B/entry) lumped fast-path
+  // and series-collapse together and rejected at maxAlloc=9204 vs 9380
+  // needed for 39 books -- which on a fragmented-heap All Books / Recently
+  // Added shelf wedged the resolve in a render-after-render empty loop
+  // (the "Loading flash" symptom). The fast-path 1:1 build only needs one
+  // contiguous std::vector<ShelfEntry> grow (sizeof(ShelfEntry) ~60 B,
+  // grows to next power of 2 = pathCount*60*2 worst case) + a small safety
+  // margin. The per-iteration std::string for path is a SEPARATE small
+  // alloc that fragments free-heap but doesn't need contiguous headroom.
+  // Series-collapse needs more (~25 KB) and is gated by its own check
+  // below. Without the split, an All Books shelf with 30-50 books on a
+  // mildly fragmented heap (maxAlloc 8-10 KB) gets stuck empty.
+  const uint32_t neededForFastBuild =
+      pathCount * sizeof(ShelfEntry) * 2u + 1024u;
+  if (pathCount > 0 && curMaxAlloc < neededForFastBuild) {
+    LOG_ERR("CLN",
+            "resolveShelfEntries: maxAlloc=%u below %u needed for %u entries -- returning empty shelf this render",
+            curMaxAlloc, neededForFastBuild, pathCount);
+    // Signal the caller that this empty came from heap pressure, not from
+    // a legitimately empty collection -- so it can skip cache commit + retry.
+    lastResolveHitHeapPressure_ = true;
+    return {};
+  }
+
+  // Even when there's enough room for the fast-path 1:1 build, the
+  // series-collapse path's std::unordered_set<std::string> seenKeys +
+  // per-series memberPaths vectors need substantially more (~25 KB
+  // empirical floor). Below that, skip the collapse but try the fast
+  // path; user sees ungrouped books for this render and the grouped
+  // view returns on the next render once heap recovers.
+  constexpr uint32_t kSeriesCollapseMinMaxAlloc = 25 * 1024;
+  const bool heapTooTightForCollapse = (curMaxAlloc < kSeriesCollapseMinMaxAlloc);
+  if (heapTooTightForCollapse) {
+    LOG_INF("CLN",
+            "resolveShelfEntries: maxAlloc=%u below %u, skipping series-collapse this render",
+            curMaxAlloc, static_cast<unsigned>(kSeriesCollapseMinMaxAlloc));
+  }
+
+  // Fast path: global series-detection opt-in is off, per-collection
+  // collapse is off, the path list is empty, OR heap is too tight to
+  // safely build the collapsed grouping. Skip the SeriesIndex lookups
+  // entirely and 1:1-wrap into single-book entries.
+  if (!SETTINGS.seriesDetectionEnabled || !c->collapseSeries || paths.empty() || heapTooTightForCollapse) {
+    std::vector<ShelfEntry> out;
+    out.reserve(paths.size());
+    for (const auto& p : paths) {
+      ShelfEntry e;
+      e.firstPath = p;
+      e.memberPaths.push_back(p);
+      out.push_back(std::move(e));
+    }
+    return out;
+  }
+
+  // Collapse path. Walk paths in their sorted order. The FIRST time we
+  // see a series-key, collect every same-key book in the collection
+  // (might not be consecutive after sort), sort that group by series
+  // index ASC, and emit as one ShelfEntry. Series with only one member
+  // present in this collection stay as single-book entries (the user's
+  // bar is "2+ books" for grouping, per their spec).
+  std::unordered_set<std::string> seenKeys;
+  std::vector<ShelfEntry> out;
+  out.reserve(paths.size());
+  auto& seriesIdx = SeriesIndex::getInstance();
+  auto nameStr = [&](const SeriesEntry* se) { return se ? std::string{seriesIdx.nameOf(*se)} : std::string{}; };
+  auto indexStr = [&](const SeriesEntry* se) { return se ? std::string{seriesIdx.indexOf(*se)} : std::string{}; };
+  for (const auto& p : paths) {
+    const SeriesEntry* se = seriesIdx.find(p);
+    const std::string seName = nameStr(se);
+    if (se == nullptr || seName.empty()) {
+      ShelfEntry e;
+      e.firstPath = p;
+      e.memberPaths.push_back(p);
+      out.push_back(std::move(e));
+      continue;
+    }
+    const std::string key = SeriesIndex::seriesKey(seName);
+    if (seenKeys.count(key)) continue;  // grouped already; subsequent members suppressed.
+    seenKeys.insert(key);
+
+    // Collect every book in this collection that maps to the same key.
+    std::vector<std::string> members;
+    for (const auto& q : paths) {
+      const SeriesEntry* qse = seriesIdx.find(q);
+      const std::string qName = nameStr(qse);
+      if (qse != nullptr && !qName.empty() && SeriesIndex::seriesKey(qName) == key) {
+        members.push_back(q);
+      }
+    }
+    if (members.size() < 2) {
+      // Singleton: render as a normal cell (no spine). Use the path we
+      // were already iterating on so output order isn't disturbed.
+      ShelfEntry e;
+      e.firstPath = p;
+      e.memberPaths.push_back(p);
+      out.push_back(std::move(e));
+      continue;
+    }
+    // Sort by series index ASC (numeric-aware comparator).
+    std::sort(members.begin(), members.end(), [&](const std::string& a, const std::string& b) {
+      const SeriesEntry* ea = seriesIdx.find(a);
+      const SeriesEntry* eb = seriesIdx.find(b);
+      return SeriesIndex::indexLess(indexStr(ea), indexStr(eb));
+    });
+    ShelfEntry e;
+    e.firstPath = members.front();
+    e.seriesName = seName;
+    e.memberPaths = std::move(members);
+    out.push_back(std::move(e));
+  }
+  return out;
+}
+
+void CollectionsStore::setActiveId(const std::string& id) {
+  if (findCollection(id) == nullptr) {
+    LOG_ERR("CLN", "Refusing to set active collection to unknown id: %s", id.c_str());
+    return;
+  }
+  if (activeId != id) {
+    activeId = id;
+    saveToFile();
+  }
+}
+
+bool CollectionsStore::loadFromFile() {
+  // v18.9.9.331: try both primary and .bak. Was Storage.readFile()
+  // which failed hard on any parse error, wiping the user's collections
+  // whenever a crash-mid-save left the primary half-written. Now uses
+  // readFileWithFallback which promotes the .bak to primary on recovery,
+  // matching what CrossPointSettings did back in v311.
+  if (!Storage.exists(COLLECTIONS_FILE) &&
+      !Storage.exists((String(COLLECTIONS_FILE) + ".bak").c_str())) {
+    return false;
+  }
+
+  bool fromBackup = false;
+  String json = readFileWithFallback(COLLECTIONS_FILE, fromBackup);
+  if (json.isEmpty()) return false;
+  if (fromBackup) {
+    LOG_INF("CLN", "collections.json missing or corrupt; recovered from .bak");
+  }
+
+  JsonDocument doc;
+  auto err = deserializeJson(doc, json.c_str());
+  if (err) {
+    LOG_ERR("CLN", "collections.json parse error: %s", err.c_str());
+    return false;
+  }
+
+  collections.clear();
+  activeId = doc["active"] | std::string(FAVORITES_ID);
+
+  // CrumBLE: optional saved L/R cycle order. Applied later in begin() once
+  // all virtuals have been seeded. Empty when the JSON predates rearrange.
+  displayOrderIds_.clear();
+  JsonArrayConst orderArr = doc["displayOrder"];
+  if (!orderArr.isNull()) {
+    displayOrderIds_.reserve(orderArr.size());
+    for (JsonVariantConst id : orderArr) {
+      const std::string s = id | std::string("");
+      if (!s.empty()) displayOrderIds_.push_back(s);
+    }
+  }
+
+  JsonArrayConst arr = doc["collections"];
+  if (!arr.isNull()) {
+    for (JsonObjectConst entry : arr) {
+      Collection c;
+      c.id = entry["id"] | std::string("");
+      c.name = entry["name"] | std::string("");
+      if (c.id.empty()) continue;
+      // Backwards compat: missing "sort" key (older JSON) defaults to
+      // Manual — same as before sort-mode existed.
+      const unsigned sortRaw = entry["sort"] | 0u;
+      if (sortRaw <= static_cast<unsigned>(CollectionSort::AuthorAlphaDesc)) {
+        c.sortMode = static_cast<CollectionSort>(sortRaw);
+      }
+      // collapseSeries defaults to true (matches struct default). Older
+      // JSON without the key picks up the default automatically.
+      c.collapseSeries = entry["collapseSeries"] | true;
+      c.twoRowShelf = entry["twoRowShelf"] | false;
+      JsonArrayConst books = entry["books"];
+      if (!books.isNull()) {
+        c.bookPaths.reserve(books.size());
+        for (JsonVariantConst path : books) {
+          const std::string p = path | std::string("");
+          if (!p.empty()) c.bookPaths.push_back(p);
+        }
+      }
+      collections.push_back(std::move(c));
+    }
+  }
+
+  LOG_DBG("CLN", "Loaded %zu collection(s); active=%s", collections.size(), activeId.c_str());
+  return true;
+}
+
+void CollectionsStore::applyDisplayOrder() {
+  if (displayOrderIds_.empty()) return;
+  // Stable-sort collections so that:
+  //   - any collection listed in displayOrderIds_ takes the position the
+  //     order specifies (collections.indexOf in the saved order),
+  //   - any collection NOT listed (e.g. a freshly-created user collection
+  //     since the last rearrange) keeps its natural position relative to
+  //     other unlisted entries, after all the ordered ones.
+  std::stable_sort(collections.begin(), collections.end(),
+                   [this](const Collection& a, const Collection& b) {
+                     const auto ia = std::find(displayOrderIds_.begin(), displayOrderIds_.end(), a.id);
+                     const auto ib = std::find(displayOrderIds_.begin(), displayOrderIds_.end(), b.id);
+                     // Listed entries always come before unlisted ones; among
+                     // listed entries, the earlier displayOrder index wins.
+                     const bool aListed = ia != displayOrderIds_.end();
+                     const bool bListed = ib != displayOrderIds_.end();
+                     if (aListed != bListed) return aListed;
+                     if (!aListed) return false;  // stable-sort handles ties
+                     return ia < ib;
+                   });
+}
+
+void CollectionsStore::setDisplayOrder(const std::vector<std::string>& orderedIds) {
+  // Refresh the saved order from the user's choice, then re-apply against the
+  // live `collections` vector. Save unconditionally -- the user explicitly
+  // confirmed this layout via the Rearrange UI, so we want it to stick.
+  displayOrderIds_ = orderedIds;
+  applyDisplayOrder();
+  saveToFile();
+}
+
+void CollectionsStore::invalidateScannedVirtuals() const {
+  scannedVirtualsValid_ = false;
+  finishedPathsCache_.clear();
+  newPathsCache_.clear();
+}
+
+void CollectionsStore::releaseMemory() {
+  // Drop in-RAM caches + the collections vector itself. Capacity returns
+  // to zero on libstdc++ via shrink_to_fit. On-disk JSON is not touched.
+  invalidateScannedVirtuals();
+  finishedPathsCache_.shrink_to_fit();
+  newPathsCache_.shrink_to_fit();
+  collections.clear();
+  collections.shrink_to_fit();
+  activeId.clear();
+  activeId.shrink_to_fit();
+}
+
+void CollectionsStore::rebuildScannedVirtualsIfNeeded() const {
+  if (scannedVirtualsValid_) return;
+  finishedPathsCache_.clear();
+  newPathsCache_.clear();
+  // LibraryIndex::getAllBookPaths() returns every EPUB the library walk saw.
+  // Membership rules:
+  //   Finished  = stats.bin exists AND isCompleted == true
+  //   Unopened  = stats.bin does NOT exist (the reader writes one on first
+  //               onEnter, so any book the reader has been into -- even
+  //               briefly -- drops out immediately)
+  // Books opened-but-not-finished are in neither set.
+  const auto& allPaths = LibraryIndex::getInstance().getAllBookPaths();
+  finishedPathsCache_.reserve(allPaths.size() / 4);
+  newPathsCache_.reserve(allPaths.size() / 4);
+  for (const auto& path : allPaths) {
+    const Epub epub(path, "/.crosspoint");
+    const std::string cachePath = epub.getCachePath();
+    if (!BookReadingStats::exists(cachePath)) {
+      newPathsCache_.push_back(path);
+    } else if (BookReadingStats::load(cachePath).isCompleted) {
+      finishedPathsCache_.push_back(path);
+    }
+  }
+  LOG_INF("CLN", "Scanned virtuals: %u total -> %u finished, %u unopened", static_cast<unsigned>(allPaths.size()),
+          static_cast<unsigned>(finishedPathsCache_.size()), static_cast<unsigned>(newPathsCache_.size()));
+  scannedVirtualsValid_ = true;
+}
+
+namespace {
+// v18.9.9.342: same defer-then-retry mechanism CrossPointSettings uses.
+// Set in saveToFile() when the heap pre-flight trips; cleared on the
+// first successful write. main.cpp's tick calls retryDeferredSaveIfNeeded
+// every loop so a transient heap dip doesn't lose the change; Home's
+// Cover heap-guard silentRestart also calls it right before reboot to
+// give the change one last chance to persist before the in-memory copy
+// gets wiped.
+bool gCollectionsSaveDeferred = false;
+// v18.9.9.363: debounce state (mirrors CrossPointSettings). saveToFile()
+// now marks pending; actual write happens after kDebounceMs of no
+// mutations OR at critical exit via flushDeferredSaveNowBypassGate().
+constexpr uint32_t kCollectionsSaveDebounceMs = 5000;
+uint32_t gCollectionsLastMutationMs = 0;
+bool gCollectionsPendingWrite = false;
+}  // namespace
+
+bool CollectionsStore::hasDeferredSave() { return gCollectionsSaveDeferred || gCollectionsPendingWrite; }
+
+void CollectionsStore::retryDeferredSaveIfNeeded() const {
+  // v18.9.9.363: fires on debounce elapsed OR heap-recovered retry.
+  const bool hasPending = gCollectionsPendingWrite || gCollectionsSaveDeferred;
+  if (!hasPending) return;
+  const uint32_t sinceLastMutation = millis() - gCollectionsLastMutationMs;
+  if (gCollectionsPendingWrite && sinceLastMutation < kCollectionsSaveDebounceMs) {
+    return;  // still batching burst-of-mutations
+  }
+  const bool ok = writeToDiskNow_();
+  if (ok) {
+    gCollectionsPendingWrite = false;
+    LOG_INF("CLN", "Debounced save committed (%u ms after last mutation)", sinceLastMutation);
+  }
+}
+
+void CollectionsStore::flushDeferredSaveNowBypassGate() const {
+  // v18.9.9.363: also flush pending-debounced writes, not just heap-deferred.
+  if (!gCollectionsSaveDeferred && !gCollectionsPendingWrite) return;
+  // v18.9.9.389: hard floor. JsonDocument construction + the doc[key] = value
+  // loop below both allocate; on extreme heap pressure one of those internal
+  // allocations can throw before the measureJson check at line ~1005 gets
+  // a chance to bail cleanly. Skip when maxAlloc is below a safe minimum so
+  // a silent-restart flush doesn't terminate. See CrossPointSettings::
+  // flushIfDirtyNow for the paired fix on the settings path.
+  {
+    constexpr uint32_t kFlushHardFloorMaxAlloc = 6u * 1024u;
+    const uint32_t maxAllocNow = ESP.getMaxAllocHeap();
+    if (maxAllocNow < kFlushHardFloorMaxAlloc) {
+      LOG_ERR("CLN",
+              "flushDeferredSaveNowBypassGate SKIPPED: maxAlloc=%u below hard floor %u -- collection change lost across restart",
+              maxAllocNow, static_cast<unsigned>(kFlushHardFloorMaxAlloc));
+      return;
+    }
+  }
+  // v18.9.9.344: measure the required output size first, then only
+  // attempt the write if maxAlloc can actually fit it (with a small
+  // safety margin for JSON build + realloc peaks). Refuses cleanly when
+  // heap is too low -- the write would truncate the String, corrupt
+  // primary, and force a next-boot fall-back to .bak.
+  //
+  // Measurement is cheap (no allocation) so we can call it even in the
+  // emergency path. If the write is possible, we attempt it directly
+  // via writeToDiskNow_(); tmp+rename bounds the mid-write downside.
+  Storage.mkdir("/.crosspoint");
+  JsonDocument doc;
+  doc["version"] = COLLECTIONS_FILE_VERSION;
+  doc["active"] = activeId;
+  JsonArray order = doc["displayOrder"].to<JsonArray>();
+  for (const auto& c : collections) order.add(c.id);
+  JsonArray arr = doc["collections"].to<JsonArray>();
+  for (const auto& c : collections) {
+    if (c.isVirtual) continue;
+    JsonObject entry = arr.add<JsonObject>();
+    entry["id"] = c.id;
+    entry["name"] = c.name;
+    entry["sort"] = static_cast<unsigned>(c.sortMode);
+    entry["collapseSeries"] = c.collapseSeries;
+    entry["twoRowShelf"] = c.twoRowShelf;
+    JsonArray books = entry["books"].to<JsonArray>();
+    for (const auto& path : c.bookPaths) books.add(path);
+  }
+  const size_t neededBytes = measureJson(doc);
+  // String reserve typically over-allocates by ~1.5x during realloc.
+  // Add a hard 1 KB minimum floor even for tiny outputs.
+  const uint32_t neededWithMargin = static_cast<uint32_t>(std::max<size_t>(neededBytes * 3U / 2U, 1024U));
+  const uint32_t maxAlloc = ESP.getMaxAllocHeap();
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  if (maxAlloc < neededWithMargin) {
+    LOG_ERR("CLN",
+            "Skipping bypass-gate flush: need %u contiguous but maxAlloc=%u (free=%u); change lost on restart",
+            neededWithMargin, maxAlloc, freeHeap);
+    return;
+  }
+  LOG_INF("CLN",
+          "Bypass-gate flush: measured=%u needed+margin=%u free=%u maxAlloc=%u",
+          static_cast<unsigned>(neededBytes), neededWithMargin, freeHeap, maxAlloc);
+  String json;
+  json.reserve(neededBytes + 32);  // + tiny header padding
+  serializeJson(doc, json);
+  const bool ok = writeFileWithBackup(COLLECTIONS_FILE, json);
+  gCollectionsSaveDeferred = !ok;
+  LOG_INF("CLN", "Bypass-gate flush result: %s (wrote %u bytes)",
+          ok ? "OK" : "FAILED", static_cast<unsigned>(json.length()));
+}
+
+bool CollectionsStore::saveToFile() const {
+  // v18.9.9.363: mark dirty + timestamp; actual write is deferred until
+  // debounce elapses. Critical exits (silentRestart, sleep) flush via
+  // flushDeferredSaveNowBypassGate. See CrossPointSettings for the
+  // same pattern rationale (reduce SD write contention).
+  gCollectionsPendingWrite = true;
+  gCollectionsLastMutationMs = millis();
+  return true;
+}
+
+bool CollectionsStore::writeToDiskNow_() const {
+  Storage.mkdir("/.crosspoint");
+
+  JsonDocument doc;
+  doc["version"] = COLLECTIONS_FILE_VERSION;
+  doc["active"] = activeId;
+  // CrumBLE: persist the full L/R cycle order so virtuals (which aren't
+  // serialised as collection entries) keep their position after a reboot.
+  // Always written -- on first save it's just the natural seeding order,
+  // which is fine because applyDisplayOrder() degrades gracefully when the
+  // saved order matches the natural one.
+  JsonArray order = doc["displayOrder"].to<JsonArray>();
+  for (const auto& c : collections) order.add(c.id);
+  JsonArray arr = doc["collections"].to<JsonArray>();
+  for (const auto& c : collections) {
+    if (c.isVirtual) continue;  // virtuals are rebuilt every begin() — don't waste SD space persisting them.
+    JsonObject entry = arr.add<JsonObject>();
+    entry["id"] = c.id;
+    entry["name"] = c.name;
+    entry["sort"] = static_cast<unsigned>(c.sortMode);
+    entry["collapseSeries"] = c.collapseSeries;
+    entry["twoRowShelf"] = c.twoRowShelf;
+    JsonArray books = entry["books"].to<JsonArray>();
+    for (const auto& path : c.bookPaths) books.add(path);
+  }
+
+  // v18.9.9.351: measure BEFORE reserving the output String. Field crash:
+  // saveToFile preflight passed at free=38920/maxAlloc=18420 (both above
+  // the 25K/12K floor) but the serializeJson to String reserved beyond
+  // maxAlloc and threw bad_alloc -> std::terminate -> hard-restart to
+  // Home losing focus + the pending change. measureJson is allocation-
+  // free; compare against maxAlloc and defer if the write can't fit.
+  const size_t neededBytes = measureJson(doc);
+  const uint32_t neededWithMargin = static_cast<uint32_t>(std::max<size_t>(neededBytes * 3U / 2U, 2048U));
+  const uint32_t maxAllocNow = ESP.getMaxAllocHeap();
+  const uint32_t freeNow = ESP.getFreeHeap();
+  if (maxAllocNow < neededWithMargin) {
+    LOG_ERR("CLN",
+            "Skipping write: measured=%u needed+margin=%u exceeds maxAlloc=%u (free=%u); deferring",
+            static_cast<unsigned>(neededBytes), neededWithMargin, maxAllocNow, freeNow);
+    gCollectionsSaveDeferred = true;
+    return false;
+  }
+  LOG_INF("CLN", "Writing: measured=%u needed+margin=%u free=%u maxAlloc=%u",
+          static_cast<unsigned>(neededBytes), neededWithMargin, freeNow, maxAllocNow);
+
+  String json;
+  json.reserve(neededBytes + 32);
+  serializeJson(doc, json);
+  // v18.9.9.331: writeFileWithBackup does tmp+rename with retry and keeps a
+  // rolling .bak. Was Storage.writeFile() which had no atomicity -- a crash
+  // mid-write (or bad_alloc terminate during the SD I/O yield) left the
+  // primary corrupted with no fallback. Field symptom: user's collections
+  // wiped after a reader-side terminate cascade. Same pattern
+  // JsonSettingsIO uses since v311.
+  const bool ok = writeFileWithBackup(COLLECTIONS_FILE, json);
+  gCollectionsSaveDeferred = !ok;  // clear on success; a real write failure also queues a retry
+  if (ok) gCollectionsPendingWrite = false;
+  return ok;
+}

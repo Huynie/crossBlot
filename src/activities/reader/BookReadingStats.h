@@ -33,6 +33,8 @@ struct BookReadingStats {
   // versioned filename, and legacy cachePath/stats.bin. Missing files are
   // treated as success.
   static bool remove(const std::string& cachePath);
+  // Crossblot (for CrumBLE collections): true when any stats file exists.
+  static bool exists(const std::string& cachePath);
 
   // Updates the running reading pace with one forward page dwell sample.
   void recordForwardPageRead(uint32_t seconds);

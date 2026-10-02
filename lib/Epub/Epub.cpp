@@ -11,6 +11,7 @@
 #include <PngToBmpConverter.h>
 #include <Utf8.h>
 #include <ZipFile.h>
+#include <expat.h>
 
 #include <algorithm>
 #include <cctype>
@@ -31,6 +32,140 @@
 
 namespace {
 constexpr int kDefaultThumbHeight = 180;
+
+// CrumBLE: minimal expat-based parser used ONLY by extractSeriesFromOpf
+// to read series metadata without touching the BookMetadataCache. We
+// can't reuse ContentOpfParser for this because that parser writes to
+// book.bin's intermediate files (tempItemStore, cache->createSpineEntry)
+// during the manifest/spine pass — using it would corrupt or trigger a
+// rebuild of the cached spine layout. This trimmed parser only handles
+// metadata state transitions; manifest/spine/guide elements are
+// ignored entirely (no state change, no character-data dispatch).
+class SeriesOnlyOpfParser : public Print {
+  enum State { START, IN_PACKAGE, IN_METADATA, IN_SERIES_NAME, IN_SERIES_INDEX, IN_DC_CREATOR };
+  XML_Parser parser = nullptr;
+  State state = START;
+  size_t remainingSize;
+
+  static void XMLCALL startElement(void* ud, const XML_Char* name, const XML_Char** atts) {
+    auto* self = static_cast<SeriesOnlyOpfParser*>(ud);
+    if (self->state == START && (strcmp(name, "package") == 0 || strcmp(name, "opf:package") == 0)) {
+      self->state = IN_PACKAGE;
+      return;
+    }
+    if (self->state == IN_PACKAGE && (strcmp(name, "metadata") == 0 || strcmp(name, "opf:metadata") == 0)) {
+      self->state = IN_METADATA;
+      return;
+    }
+    // CrumBLE 4.5.2: also capture dc:creator so AuthorAlpha sort can fill
+    // its key cache without doing a full Epub::load + book.bin build on
+    // never-opened books. Author appears in the metadata block alongside
+    // series, so the existing </metadata> early-exit covers both.
+    if (self->state == IN_METADATA &&
+        (strcmp(name, "dc:creator") == 0 || strcmp(name, "creator") == 0)) {
+      self->state = IN_DC_CREATOR;
+      self->author.clear();
+      return;
+    }
+    if (self->state == IN_METADATA && (strcmp(name, "meta") == 0 || strcmp(name, "opf:meta") == 0)) {
+      const char* attrName = nullptr;
+      const char* attrContent = nullptr;
+      const char* attrProperty = nullptr;
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "name") == 0) attrName = atts[i + 1];
+        else if (strcmp(atts[i], "content") == 0) attrContent = atts[i + 1];
+        else if (strcmp(atts[i], "property") == 0) attrProperty = atts[i + 1];
+      }
+      if (attrName != nullptr && attrContent != nullptr) {
+        if (strcmp(attrName, "calibre:series") == 0 || strcmp(attrName, "series") == 0) {
+          self->seriesName = attrContent;
+        } else if (strcmp(attrName, "calibre:series_index") == 0 || strcmp(attrName, "series_index") == 0) {
+          self->seriesIndex = attrContent;
+        }
+      }
+      if (attrProperty != nullptr) {
+        if (strcmp(attrProperty, "belongs-to-collection") == 0) {
+          self->state = IN_SERIES_NAME;
+          self->seriesName.clear();
+        } else if (strcmp(attrProperty, "group-position") == 0) {
+          self->state = IN_SERIES_INDEX;
+          self->seriesIndex.clear();
+        }
+      }
+    }
+  }
+
+  static void XMLCALL endElement(void* ud, const XML_Char* name) {
+    auto* self = static_cast<SeriesOnlyOpfParser*>(ud);
+    if ((self->state == IN_SERIES_NAME || self->state == IN_SERIES_INDEX) &&
+        (strcmp(name, "meta") == 0 || strcmp(name, "opf:meta") == 0)) {
+      self->state = IN_METADATA;
+      return;
+    }
+    if (self->state == IN_DC_CREATOR &&
+        (strcmp(name, "dc:creator") == 0 || strcmp(name, "creator") == 0)) {
+      self->state = IN_METADATA;
+      return;
+    }
+    if (self->state == IN_METADATA && (strcmp(name, "metadata") == 0 || strcmp(name, "opf:metadata") == 0)) {
+      // Series + author tags appear early in the metadata block; stop
+      // parsing once metadata closes -- the rest of the OPF (manifest,
+      // spine, guide) is irrelevant for the peek and would just burn
+      // CPU. Returning XML_StopParser would be cleaner but expat's
+      // status code propagates and the caller would log a false error.
+      self->state = START;
+    }
+  }
+
+  static void XMLCALL characterData(void* ud, const XML_Char* s, int len) {
+    auto* self = static_cast<SeriesOnlyOpfParser*>(ud);
+    if (self->state == IN_DC_CREATOR) {
+      self->author.append(s, len);
+    } else if (self->state == IN_SERIES_NAME) {
+      self->seriesName.append(s, len);
+    } else if (self->state == IN_SERIES_INDEX) {
+      self->seriesIndex.append(s, len);
+    }
+  }
+
+ public:
+  std::string seriesName;
+  std::string seriesIndex;
+  std::string author;
+
+  explicit SeriesOnlyOpfParser(size_t xmlSize) : remainingSize(xmlSize) {}
+  ~SeriesOnlyOpfParser() override {
+    if (parser) XML_ParserFree(parser);
+  }
+  bool setup() {
+    parser = XML_ParserCreate(nullptr);
+    if (!parser) return false;
+    XML_SetUserData(parser, this);
+    XML_SetElementHandler(parser, startElement, endElement);
+    XML_SetCharacterDataHandler(parser, characterData);
+    return true;
+  }
+  size_t write(uint8_t b) override { return write(&b, 1); }
+  size_t write(const uint8_t* buffer, size_t size) override {
+    if (!parser) return 0;
+    auto remaining = size;
+    auto* p = buffer;
+    while (remaining > 0) {
+      void* buf = XML_GetBuffer(parser, 1024);
+      if (!buf) return 0;
+      const auto chunk = remaining < 1024 ? remaining : 1024;
+      memcpy(buf, p, chunk);
+      if (XML_ParseBuffer(parser, static_cast<int>(chunk), remainingSize == chunk) == XML_STATUS_ERROR) {
+        return 0;
+      }
+      p += chunk;
+      remaining -= chunk;
+      remainingSize -= chunk;
+    }
+    return size;
+  }
+};
+
 constexpr char kXLocationsPath[] = "META-INF/x-locations.json";
 constexpr char kXLocationsFormat[] = "x-locations";
 constexpr char kLegacyXLocationsFormat[] = "crossink-locations";
@@ -1338,7 +1473,13 @@ bool Epub::generateThumbBmpInternal(int width, int height, const bool adaptiveCo
     return false;
   }
 
-  const auto coverImageHref = bookMetadataCache->coreMetadata.coverItemHref;
+  return convertCoverToThumbBmp(bookMetadataCache->coreMetadata.coverItemHref, thumbPath, width, height,
+                                adaptiveContain, renderer, readerFontId);
+}
+
+bool Epub::convertCoverToThumbBmp(const std::string& coverImageHref, const std::string& thumbPath, const int width,
+                                  const int height, const bool adaptiveContain, const GfxRenderer* renderer,
+                                  const int readerFontId) const {
   if (coverImageHref.empty()) {
     LOG_DBG("EBP", "No known cover image for thumbnail");
   } else if (FsHelpers::hasJpgExtension(coverImageHref)) {
@@ -1406,6 +1547,30 @@ bool Epub::generateThumbBmpInternal(int width, int height, const bool adaptiveCo
   }
 
   return false;
+}
+
+bool Epub::generateThumbBmpNoIndex(int width, int height) {
+  normalizeThumbDimensions(width, height);
+  const std::string thumbPath = getThumbBmpPathForDimensions(cachePath, width, height);
+  if (cachedBmpMatchesDimensions(thumbPath, width, height, false)) {
+    return true;
+  }
+
+  // Book opened before: reuse the cached cover href.
+  BookMetadataCache cached(cachePath);
+  if (cached.load()) {
+    return convertCoverToThumbBmp(cached.coreMetadata.coverItemHref, thumbPath, width, height, false, nullptr, 0);
+  }
+
+  // Never opened: parse only content.opf (no spine/TOC/book.bin build) to
+  // find the cover. Keeps a shelf of new books from indexing every one.
+  setupCacheDir();
+  BookMetadataCache::BookMetadata meta;
+  if (!parseContentOpf(meta, /*writeSpineEntries=*/false, /*collectCssFiles=*/false)) {
+    LOG_DBG("EBP", "generateThumbBmpNoIndex: could not parse content.opf for %s", filepath.c_str());
+    return false;
+  }
+  return convertCoverToThumbBmp(meta.coverItemHref, thumbPath, width, height, false, nullptr, 0);
 }
 
 uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size, const bool trailingNullByte) const {
@@ -2263,4 +2428,46 @@ int Epub::resolveHrefToSpineIndex(const std::string& href) const {
     if (spineFilename == targetFilename) return i;
   }
   return -1;
+}
+
+// Crossblot (from CrumBLE): cheap OPF peek for author/series without
+// touching book.bin. Used by LibraryIndex author sort keys.
+bool Epub::extractSeriesFromOpf() {
+  // Locate the OPF inside the EPUB ZIP. Same path findContentOpfFile
+  // takes for the full parse — reuses the existing container.xml
+  // reader and ZipFile membership.
+  std::string contentOpfFilePath;
+  if (!findContentOpfFile(&contentOpfFilePath)) {
+    LOG_DBG("EBP", "extractSeriesFromOpf: no OPF in %s", filepath.c_str());
+    return false;
+  }
+  size_t contentOpfSize = 0;
+  if (!getItemSize(contentOpfFilePath, &contentOpfSize)) {
+    return false;
+  }
+  SeriesOnlyOpfParser parser(contentOpfSize);
+  if (!parser.setup()) return false;
+  if (!readItemContentsToStream(contentOpfFilePath, parser, 1024)) return false;
+  // Save into the instance fields the caller will read via the
+  // existing getSeriesName/getSeriesIndex accessors. CrumBLE 4.5.2:
+  // also stash author so AuthorAlpha sort can backfill its key cache
+  // without a separate OPF parse pass.
+  lastSeriesName = parser.seriesName;
+  lastSeriesIndex = parser.seriesIndex;
+  lastAuthorPeek = parser.author;
+  // Strip leading/trailing whitespace that EPUB 3 belongs-to-collection
+  // text bodies often carry due to pretty-printed XML.
+  auto trim = [](std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    size_t b = s.find_last_not_of(" \t\r\n");
+    if (a == std::string::npos) {
+      s.clear();
+      return;
+    }
+    s = s.substr(a, b - a + 1);
+  };
+  trim(lastSeriesName);
+  trim(lastSeriesIndex);
+  trim(lastAuthorPeek);
+  return true;
 }

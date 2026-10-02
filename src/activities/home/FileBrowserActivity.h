@@ -18,7 +18,9 @@
 class FileBrowserActivity final : public Activity {
  public:
   // Picker modes return their selected path via ActivityResult.
-  enum class Mode { Books, PickFirmware, PickDirectory };
+  // PickBook (Crossblot, from CrumBLE): browse books; Confirm on a file returns
+  // its path instead of opening it. Used to add books to a collection.
+  enum class Mode { Books, PickFirmware, PickDirectory, PickBook };
 
  private:
   // FreeInkApp hosts the file list (themed rows, icons, touch routing); the

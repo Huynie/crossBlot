@@ -329,6 +329,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme. Raw values are persisted in settings; keep existing values stable.
+  // Crossblot (from CrumBLE): Bookshelf grid size and title strip placement.
+  enum BOOKSHELF_LAYOUT { BOOKSHELF_LAYOUT_3X3 = 0, BOOKSHELF_LAYOUT_4X4 = 1, BOOKSHELF_LAYOUT_2X2 = 2,
+                          BOOKSHELF_LAYOUT_COUNT };
+  enum BOOKSHELF_TITLE_PLACEMENT { BOOKSHELF_TITLE_PLACEMENT_BOTTOM = 0, BOOKSHELF_TITLE_PLACEMENT_TOP = 1,
+                                   BOOKSHELF_TITLE_PLACEMENT_COUNT };
   enum UI_THEME {
     CLASSIC = 0,
     LYRA = 1,
@@ -425,6 +430,16 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Crossblot (from CrumBLE): while asleep with a Custom sleep screen, a brief
   // power tap shows the next sleep image and goes straight back to sleep.
   uint8_t cycleScreensaverOnTap = 1;
+  // Crossblot (CrumBLE collections): index-backed virtual collections. Off by
+  // default so a fresh device never walks the whole SD card at boot.
+  uint8_t showRecentlyAddedCollection = 0;
+  uint8_t showAllBooksCollection = 0;
+  uint8_t showFinishedCollection = 0;  // books marked complete
+  uint8_t showNewCollection = 0;       // books never opened
+  // Series collapse on the shelf is CrumBLE beta; not exposed in Crossblot.
+  uint8_t seriesDetectionEnabled = 0;
+  uint8_t bookshelfLayout = BOOKSHELF_LAYOUT_4X4;
+  uint8_t bookshelfTitlePlacement = BOOKSHELF_TITLE_PLACEMENT_BOTTOM;
   // Status bar settings (statusBar retained for migration only)
   uint8_t statusBar = FULL;
   uint8_t statusBarChapterPageCount = 1;

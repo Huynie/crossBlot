@@ -17,6 +17,10 @@ class GfxRenderer;
 
 class Epub {
  private:
+  // Crossblot: filled by extractSeriesFromOpf().
+  std::string lastSeriesName;
+  std::string lastSeriesIndex;
+  std::string lastAuthorPeek;
   // the ncx file (EPUB 2)
   std::string tocNcxItem;
   // the nav file (EPUB 3)
@@ -49,6 +53,15 @@ class Epub {
   };
 
  public:
+  // Crossblot (from CrumBLE): parse only the OPF metadata for series and
+  // author, leaving the book.bin cache untouched.
+  // Crossblot (from CrumBLE): cover thumbnail without building book.bin, for
+  // shelves of never-opened books.
+  bool generateThumbBmpNoIndex(int width, int height);
+  bool extractSeriesFromOpf();
+  const std::string& getSeriesName() const { return lastSeriesName; }
+  const std::string& getSeriesIndex() const { return lastSeriesIndex; }
+  const std::string& getLastAuthorPeek() const { return lastAuthorPeek; }
   bool ensureOptimizerImageIndex();
   enum class OpenFailure : uint8_t {
     None,
@@ -212,4 +225,6 @@ class Epub {
   bool ensureCachedCoverImage(const std::string& coverImageHref, std::string& outPath) const;
   bool generateThumbBmpInternal(int width, int height, bool adaptiveContain, const GfxRenderer* renderer,
                                 int readerFontId) const;
+  bool convertCoverToThumbBmp(const std::string& coverImageHref, const std::string& thumbPath, int width, int height,
+                              bool adaptiveContain, const GfxRenderer* renderer, int readerFontId) const;
 };
