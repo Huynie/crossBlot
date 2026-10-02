@@ -42,7 +42,7 @@ constexpr int kDefaultThumbHeight = 180;
 // metadata state transitions; manifest/spine/guide elements are
 // ignored entirely (no state change, no character-data dispatch).
 class SeriesOnlyOpfParser : public Print {
-  enum State { START, IN_PACKAGE, IN_METADATA, IN_SERIES_NAME, IN_SERIES_INDEX, IN_DC_CREATOR };
+  enum State { START, IN_PACKAGE, IN_METADATA, IN_SERIES_NAME, IN_SERIES_INDEX, IN_DC_CREATOR, IN_DC_TITLE };
   XML_Parser parser = nullptr;
   State state = START;
   size_t remainingSize;
@@ -65,6 +65,12 @@ class SeriesOnlyOpfParser : public Print {
         (strcmp(name, "dc:creator") == 0 || strcmp(name, "creator") == 0)) {
       self->state = IN_DC_CREATOR;
       self->author.clear();
+      return;
+    }
+    // Crossblot: first dc:title too, so shelves can caption never-opened books.
+    if (self->state == IN_METADATA && self->title.empty() &&
+        (strcmp(name, "dc:title") == 0 || strcmp(name, "title") == 0)) {
+      self->state = IN_DC_TITLE;
       return;
     }
     if (self->state == IN_METADATA && (strcmp(name, "meta") == 0 || strcmp(name, "opf:meta") == 0)) {
@@ -107,6 +113,10 @@ class SeriesOnlyOpfParser : public Print {
       self->state = IN_METADATA;
       return;
     }
+    if (self->state == IN_DC_TITLE && (strcmp(name, "dc:title") == 0 || strcmp(name, "title") == 0)) {
+      self->state = IN_METADATA;
+      return;
+    }
     if (self->state == IN_METADATA && (strcmp(name, "metadata") == 0 || strcmp(name, "opf:metadata") == 0)) {
       // Series + author tags appear early in the metadata block; stop
       // parsing once metadata closes -- the rest of the OPF (manifest,
@@ -121,6 +131,8 @@ class SeriesOnlyOpfParser : public Print {
     auto* self = static_cast<SeriesOnlyOpfParser*>(ud);
     if (self->state == IN_DC_CREATOR) {
       self->author.append(s, len);
+    } else if (self->state == IN_DC_TITLE) {
+      self->title.append(s, len);
     } else if (self->state == IN_SERIES_NAME) {
       self->seriesName.append(s, len);
     } else if (self->state == IN_SERIES_INDEX) {
@@ -132,6 +144,7 @@ class SeriesOnlyOpfParser : public Print {
   std::string seriesName;
   std::string seriesIndex;
   std::string author;
+  std::string title;
 
   explicit SeriesOnlyOpfParser(size_t xmlSize) : remainingSize(xmlSize) {}
   ~SeriesOnlyOpfParser() override {
@@ -2455,6 +2468,7 @@ bool Epub::extractSeriesFromOpf() {
   lastSeriesName = parser.seriesName;
   lastSeriesIndex = parser.seriesIndex;
   lastAuthorPeek = parser.author;
+  lastTitlePeek = parser.title;
   // Strip leading/trailing whitespace that EPUB 3 belongs-to-collection
   // text bodies often carry due to pretty-printed XML.
   auto trim = [](std::string& s) {
@@ -2469,5 +2483,6 @@ bool Epub::extractSeriesFromOpf() {
   trim(lastSeriesName);
   trim(lastSeriesIndex);
   trim(lastAuthorPeek);
+  trim(lastTitlePeek);
   return true;
 }

@@ -19,7 +19,7 @@
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
-#include "components/themes/lyra/DuetCarouselTheme.h"
+#include "components/themes/lyra/CollectionCarouselTheme.h"
 #include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
@@ -99,10 +99,10 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentTheme = std::make_unique<LyraFlowTheme>();
       currentMetrics = &LyraFlowMetrics::values;
       break;
-    case CrossPointSettings::UI_THEME::DUET_CAROUSEL:
-      LOG_DBG("UI", "Using Duet Carousel theme");
-      currentTheme = std::make_unique<DuetCarouselTheme>();
-      currentMetrics = &DuetCarouselMetrics::values;
+    case CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL:
+      LOG_DBG("UI", "Using Collection Carousel theme");
+      currentTheme = std::make_unique<CollectionCarouselTheme>();
+      currentMetrics = &CollectionCarouselMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::MINIMAL:
       LOG_DBG("UI", "Using Minimal theme");

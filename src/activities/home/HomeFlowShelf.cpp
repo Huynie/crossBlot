@@ -32,6 +32,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/lyra/CollectionCarouselTheme.h"
 #include "components/themes/lyra/LyraFlowTheme.h"
 #include "fontIds.h"
 
@@ -104,6 +105,11 @@ VirtualToggle virtualToggleFor(const CollectionOption option) {
 
 bool HomeActivity::flowThemeActive() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_FLOW;
+}
+
+bool HomeActivity::collectionCarouselActive() {
+  return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) ==
+         CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL;
 }
 
 bool HomeActivity::flowShelfEnabled() const {
@@ -200,6 +206,7 @@ void HomeActivity::updateFocusedShelfMeta(const std::string& path) {
       focusedMetaTitle = epub.getTitle();
       focusedMetaAuthor = epub.getAuthor();
     } else if (epub.extractSeriesFromOpf()) {
+      focusedMetaTitle = epub.getLastTitlePeek();
       focusedMetaAuthor = epub.getLastAuthorPeek();
     }
   } else if (FsHelpers::hasXtcExtension(path)) {
@@ -756,4 +763,169 @@ void HomeActivity::applyCollectionOption(const uint8_t optionValue, const int me
       return;
     }
   }
+}
+
+// ---- Collection Carousel theme ---------------------------------------------
+// Same collection data and menus as the Flow shelf, drawn as one five-cover
+// carousel. Rows: collection header -> carousel -> icon bar.
+
+void HomeActivity::loadCarouselCovers(const int coverWidth, const int coverHeight) {
+  if (shelfCoversLoaded) return;
+  shelfCoversLoaded = true;
+  const auto& entries = cachedShelfEntries();
+  const int total = static_cast<int>(entries.size());
+  if (total == 0) return;
+
+  bool showingLoading = false;
+  Rect popupRect;
+  const int visible = std::min(total, 5);
+  for (int k = 0; k < visible; ++k) {
+    const int offset = k == 0 ? 0 : (k % 2 == 1 ? (k + 1) / 2 : -(k / 2));  // centre, +1, -1, +2, -2
+    const int i = ((shelfBookIndex + offset) % total + total) % total;
+    const std::string& bookPath = entries[i].firstPath;
+    if (bookPath == kEmptyCollectionCtaPath || !Storage.exists(bookPath.c_str())) continue;
+    if (std::find(failedShelfCovers.begin(), failedShelfCovers.end(), bookPath) != failedShelfCovers.end()) continue;
+    if (CoverThumbStatus::isMarkedFailed(bookPath, coverWidth, coverHeight)) continue;
+    const std::string templatePath = thumbTemplateFor(bookPath);
+    if (templatePath.empty()) continue;
+    const std::string resolved = UITheme::getCoverThumbPath(templatePath, coverWidth, coverHeight);
+    if (resolved.empty() || Storage.exists(resolved.c_str())) continue;
+
+    if (!showingLoading) {
+      showingLoading = true;
+      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    }
+    GUI.fillPopupProgress(renderer, popupRect, 10 + (k * 90) / visible);
+    bool generated = false;
+    if (FsHelpers::hasEpubExtension(bookPath)) {
+      Epub epub(bookPath, "/.crosspoint");
+      generated = epub.generateThumbBmpNoIndex(coverWidth, coverHeight);
+    } else {
+      Xtc xtc(bookPath, "/.crosspoint");
+      generated = xtc.load() &&
+                  xtc.generateThumbBmp(static_cast<uint16_t>(coverWidth), static_cast<uint16_t>(coverHeight));
+    }
+    if (!generated || !Storage.exists(resolved.c_str())) {
+      failedShelfCovers.push_back(bookPath);
+      if (ESP.getFreeHeap() >= 45u * 1024u) CoverThumbStatus::markFailed(bookPath, coverWidth, coverHeight);
+    }
+  }
+  if (showingLoading) requestUpdate();
+}
+
+void HomeActivity::renderCollectionCarousel(const int pageWidth, const int pageHeight) {
+  auto& store = CollectionsStore::getInstance();
+  const Collection* active = store.getActiveCollection();
+  const auto& entries = cachedShelfEntries();
+  // An empty user collection resolves to the single "add books" placeholder.
+  const bool ctaOnly = entries.size() == 1 && entries[0].firstPath == kEmptyCollectionCtaPath;
+  const int total = ctaOnly ? 0 : static_cast<int>(entries.size());
+  shelfBookIndex = total > 0 ? std::clamp(shelfBookIndex, 0, total - 1) : 0;
+
+  int coverW = 0;
+  int coverH = 0;
+  CollectionCarouselTheme::coverSize(renderer, coverW, coverH);
+  loadCarouselCovers(coverW, coverH);
+
+  if (total > 0) updateFocusedShelfMeta(entries[shelfBookIndex].firstPath);
+  const auto itemAt = [&](const int index) {
+    CollectionCarouselTheme::Item item;
+    const std::string& path = entries[index].firstPath;
+    const std::string templatePath = thumbTemplateFor(path);
+    if (!templatePath.empty()) {
+      std::string resolved = UITheme::getCoverThumbPath(templatePath, coverW, coverH);
+      if (!resolved.empty() && Storage.exists(resolved.c_str())) item.thumbPath = std::move(resolved);
+    }
+    if (index == shelfBookIndex) {
+      item.title = focusedMetaTitle;
+      item.author = focusedMetaAuthor;
+    } else {
+      item.title = displayNameFromPath(path);
+    }
+    return item;
+  };
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  // The band ends where Flow's icon bar label begins.
+  const Rect band{0, metrics.homeTopPadding, pageWidth, pageHeight - 150 - metrics.homeTopPadding};
+  static_cast<const CollectionCarouselTheme&>(GUI).drawCollectionCarousel(
+      renderer, band, active != nullptr ? active->name.c_str() : "", shelfFocus == ShelfFocus::Header,
+      store.getCollections().size() > 1, total, total > 0 ? shelfBookIndex : -1, shelfFocus == ShelfFocus::Books,
+      itemAt, ctaOnly ? tr(STR_EMPTY_COLLECTION_ADD) : tr(STR_EMPTY_COLLECTION_VIRTUAL));
+}
+
+bool HomeActivity::handleCollectionCarouselInput(const int bookCount, const int menuItemCount) {
+  if (pendingFlowLongPress != FlowLongPress::None) {
+    if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+      const FlowLongPress action = pendingFlowLongPress;
+      pendingFlowLongPress = FlowLongPress::None;
+      runFlowLongPress(action);
+    }
+    return true;
+  }
+  const bool confirmLongPress = mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+                                mappedInput.getHeldTime() >= kShelfLongPressMs;
+
+  if (shelfFocus == ShelfFocus::None) {
+    // Icon bar. There is no recent-books row, so keep the cursor on the icons.
+    if (selectorIndex < bookCount) selectorIndex = bookCount + std::clamp(lastFlowMenuIndex, 0, menuItemCount - 1);
+    if (confirmLongPress) {
+      if (selectorIndex - bookCount == kFlowBookshelfMenuIndex) {
+        pendingFlowLongPress = FlowLongPress::BookshelfIcon;
+        return true;
+      }
+      return false;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+        mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      lastFlowMenuIndex = selectorIndex - bookCount;
+      shelfFocus = mappedInput.wasPressed(MappedInputManager::Button::Up) ? ShelfFocus::Books : ShelfFocus::Header;
+      requestUpdate();
+      return true;
+    }
+    return false;  // Left/Right/Confirm on the icons: the shared carousel code
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) return false;  // Back still reopens the last book
+
+  const auto& entries = cachedShelfEntries();
+  const bool ctaOnly = entries.size() == 1 && entries[0].firstPath == kEmptyCollectionCtaPath;
+  const int total = ctaOnly ? 0 : static_cast<int>(entries.size());
+
+  if (shelfFocus == ShelfFocus::Header) {
+    if (confirmLongPress) {
+      pendingFlowLongPress = FlowLongPress::Header;
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+      cycleActiveCollection(-1);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+      cycleActiveCollection(+1);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+      leaveShelfToMenu(bookCount, menuItemCount);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      shelfFocus = ShelfFocus::Books;
+      requestUpdate();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      onBookshelfOpen();
+    }
+    return true;
+  }
+
+  // Carousel row
+  if (confirmLongPress) {
+    pendingFlowLongPress = FlowLongPress::ShelfBook;
+  } else if (total > 0 && (mappedInput.wasPressed(MappedInputManager::Button::Left) ||
+                           mappedInput.wasPressed(MappedInputManager::Button::Right))) {
+    const int step = mappedInput.wasPressed(MappedInputManager::Button::Right) ? 1 : -1;
+    shelfBookIndex = ((shelfBookIndex + step) % total + total) % total;
+    shelfCoversLoaded = false;  // a new book may enter the five visible slots
+    requestUpdate();
+  } else if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+    shelfFocus = ShelfFocus::Header;
+    requestUpdate();
+  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+    leaveShelfToMenu(bookCount, menuItemCount);
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    openShelfEntry();
+  }
+  return true;
 }

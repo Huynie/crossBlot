@@ -155,6 +155,10 @@ class HomeActivity final : public Activity {
   std::string focusedMetaAuthor;
 
   static bool flowThemeActive();
+  static bool collectionCarouselActive();
+  void renderCollectionCarousel(int pageWidth, int pageHeight);
+  void loadCarouselCovers(int coverWidth, int coverHeight);
+  bool handleCollectionCarouselInput(int bookCount, int menuItemCount);
   bool flowShelfEnabled() const;
   void invalidateShelf();
   const std::vector<ShelfEntry>& cachedShelfEntries();

@@ -343,7 +343,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     MINIMAL = 5,
     DASHBOARD = 6,
     LYRA_FLOW = 7,      // Crossblot: CrumBLE Flow (carousel + collections shelf + icon bar)
-    DUET_CAROUSEL = 8,  // Crossblot: Duet's five-cover carousel + icon bar, no shelf
+    COLLECTION_CAROUSEL = 8,  // Crossblot: collections browsed as Duet's five-cover carousel
     UI_THEME_COUNT = 9
   };
   enum RECENT_BOOKS_VIEW { RECENT_BOOKS_LIST = 0, RECENT_BOOKS_GRID = 1, RECENT_BOOKS_VIEW_COUNT };

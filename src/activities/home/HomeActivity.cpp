@@ -39,7 +39,7 @@
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
-#include "components/themes/lyra/DuetCarouselTheme.h"
+#include "components/themes/lyra/CollectionCarouselTheme.h"
 #include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
@@ -269,7 +269,8 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
                          bool hasClippings) {
   items.push({tr(STR_BROWSE_FILES), Folder, HomeMenuAction::BrowseFiles});
   // Crossblot: on Flow this entry opens the collection Bookshelf grid.
-  if (static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_FLOW) {
+  if (static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_FLOW ||
+      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL) {
     items.push({tr(STR_BOOKSHELF), Book, HomeMenuAction::RecentBooks});
   } else {
     items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
@@ -366,14 +367,14 @@ bool usesMinimalHomeInteraction() { return isMinimalTheme() || isDashboardTheme(
 bool usesCarouselNavigation() {
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
   return theme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL || theme == CrossPointSettings::UI_THEME::LYRA_FLOW ||
-         theme == CrossPointSettings::UI_THEME::DUET_CAROUSEL;
+         theme == CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL;
 }
 
-// Themes that draw the carousel themselves (Flow, Duet Carousel) and decode
+// Themes that draw the carousel themselves (Flow) and decode
 // "bookCount + index" as "keep this book centred, no selection ring".
 bool drawsOwnCarousel() {
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
-  return theme == CrossPointSettings::UI_THEME::LYRA_FLOW || theme == CrossPointSettings::UI_THEME::DUET_CAROUSEL;
+  return theme == CrossPointSettings::UI_THEME::LYRA_FLOW;
 }
 
 bool showMinimalHomeButtonHints(const MappedInputManager& mappedInput) { return !mappedInput.hasTouch(); }
@@ -626,8 +627,7 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
               "kMaxCachedBooks must cover all carousel slots");
 static_assert(HomeActivity::kMaxCachedBooks >= LyraFlowMetrics::values.homeRecentBooksCount,
               "kMaxCachedBooks must cover all Flow carousel slots");
-static_assert(HomeActivity::kMaxCachedBooks >= DuetCarouselMetrics::values.homeRecentBooksCount,
-              "kMaxCachedBooks must cover all Duet carousel slots");
+
 
 int HomeActivity::getMenuItemCount() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -889,10 +889,11 @@ void HomeActivity::onEnter() {
 
   // Crossblot: Flow's collection shelf needs the library stores; other themes
   // and the reader never load them.
-  if (flowThemeActive()) {
+  if (flowThemeActive() || collectionCarouselActive()) {
     CollectionsStore::loadLibraryStores();
     libraryStoresLoaded = true;
-    shelfFocus = ShelfFocus::None;
+    // Collection Carousel has no recent-books row: start on its carousel.
+    shelfFocus = collectionCarouselActive() ? ShelfFocus::Books : ShelfFocus::None;
     invalidateShelf();
   }
 
@@ -1838,6 +1839,9 @@ void HomeActivity::loop() {
   if (flowThemeActive() && handleFlowInput(visibleBookCount, carouselMenuItemCount)) {
     return;
   }
+  if (collectionCarouselActive() && handleCollectionCarouselInput(visibleBookCount, carouselMenuItemCount)) {
+    return;
+  }
 
   if (!carouselTouchOnly && !hasCarouselSwipe && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       backPressSeen && !recentBooks.empty()) {
@@ -2322,10 +2326,14 @@ void HomeActivity::render(RenderLock&&) {
       flowOffCarousel && flowBookCount > 0
           ? flowBookCount + std::clamp(lastCarouselBookIndex, 0, flowBookCount - 1)
           : selectorIndex;
-  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, homeCoverTileHeight}, recentBooks,
-                          coverSelectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this),
-                          hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent);
+  if (collectionCarouselActive()) {
+    renderCollectionCarousel(pageWidth, pageHeight);
+  } else {
+    GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, homeCoverTileHeight}, recentBooks,
+                            coverSelectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                            std::bind(&HomeActivity::storeCoverBuffer, this),
+                            hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent);
+  }
 
   const int menuStartY = metrics.homeTopPadding + homeCoverTileHeight + metrics.homeMenuTopOffset;
   const int menuEndY = pageHeight - metrics.buttonHintsHeight;
@@ -2428,7 +2436,7 @@ void HomeActivity::onContinueReading() {
 }
 
 void HomeActivity::onRecentsOpen() {
-  if (flowThemeActive()) {
+  if (flowThemeActive() || collectionCarouselActive()) {
     onBookshelfOpen();
     return;
   }

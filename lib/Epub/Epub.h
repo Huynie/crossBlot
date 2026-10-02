@@ -21,6 +21,7 @@ class Epub {
   std::string lastSeriesName;
   std::string lastSeriesIndex;
   std::string lastAuthorPeek;
+  std::string lastTitlePeek;
   // the ncx file (EPUB 2)
   std::string tocNcxItem;
   // the nav file (EPUB 3)
@@ -62,6 +63,7 @@ class Epub {
   const std::string& getSeriesName() const { return lastSeriesName; }
   const std::string& getSeriesIndex() const { return lastSeriesIndex; }
   const std::string& getLastAuthorPeek() const { return lastAuthorPeek; }
+  const std::string& getLastTitlePeek() const { return lastTitlePeek; }
   bool ensureOptimizerImageIndex();
   enum class OpenFailure : uint8_t {
     None,
