@@ -42,7 +42,7 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
   l.counterY = l.headerY + l.headerLineH;
   CollectionCarouselTheme::coverSize(renderer, l.centerW, l.centerH);
   l.centerX = (pageWidth - l.centerW) / 2;
-  l.centerY = l.counterY + renderer.getLineHeight(SMALL_FONT_ID) + 12;
+  l.centerY = l.counterY + renderer.getLineHeight(SMALL_FONT_ID) + 24;  // breathing room under the count
 
   // The side covers share the space beside the (large) centre cover: the near
   // cover tucks a quarter of its width under the centre, the far cover runs
@@ -66,7 +66,7 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
 
   l.textW = std::max(40, pageWidth - sidePadding * 2);
   l.titleLineH = renderer.getLineHeight(UI_12_FONT_ID);
-  l.titleY = l.centerY + l.centerH + kSelectionPadding + 12;
+  l.titleY = l.centerY + l.centerH + kSelectionPadding + 22;  // breathing room above the title
   return l;
 }
 
@@ -173,7 +173,7 @@ void drawArrow(GfxRenderer& renderer, const int tipX, const int midY, const bool
 void CollectionCarouselTheme::coverSize(const GfxRenderer& renderer, int& width, int& height) {
   // About Lyra Carousel's centre cover (296x468), sized to leave room for the
   // collection header above and the title / author / position below.
-  height = std::min(468, renderer.getScreenHeight() * 56 / 100);
+  height = std::min(468, renderer.getScreenHeight() * 53 / 100);
   width = std::max(1, height * kCoverAspectW / kCoverAspectH);
   const int maxWidth = renderer.getScreenWidth() * 58 / 100;
   if (width > maxWidth) {
