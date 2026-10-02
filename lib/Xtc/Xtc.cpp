@@ -203,6 +203,59 @@ bool openXtchSourceCache(const Xtc& xtc, const xtc::PageInfo& pageInfo, FsFile& 
   return true;
 }
 
+// Crossblot: XTC cover pages are the cover art fitted onto a full e-ink page,
+// so they usually carry white margins. Thumbnails crop-fill from the inked
+// "content box" instead of the whole page. A row/column counts as content when
+// more than 1% of it is non-white; tiny or missing boxes fall back to the page.
+struct ContentBox {
+  uint32_t x, y, w, h;
+};
+
+ContentBox trimToContent(const uint16_t pageW, const uint16_t pageH, const uint16_t* rowInk, const uint16_t* colInk) {
+  const ContentBox full{0, 0, pageW, pageH};
+  if (rowInk == nullptr || colInk == nullptr) return full;
+  const uint16_t rowMin = static_cast<uint16_t>(pageW / 100 + 1);
+  const uint16_t colMin = static_cast<uint16_t>(pageH / 100 + 1);
+  int top = -1, bottom = -1, left = -1, right = -1;
+  for (int y = 0; y < pageH; ++y) {
+    if (rowInk[y] >= rowMin) {
+      if (top < 0) top = y;
+      bottom = y;
+    }
+  }
+  for (int x = 0; x < pageW; ++x) {
+    if (colInk[x] >= colMin) {
+      if (left < 0) left = x;
+      right = x;
+    }
+  }
+  if (top < 0 || left < 0) return full;
+  const ContentBox box{static_cast<uint32_t>(left), static_cast<uint32_t>(top), static_cast<uint32_t>(right - left + 1),
+                       static_cast<uint32_t>(bottom - top + 1)};
+  if (box.w * 4 < pageW || box.h * 4 < pageH) return full;
+  return box;
+}
+
+// Object-fit: cover of the content box into the thumbnail, in 16.16 fixed point.
+struct CropWindow {
+  uint32_t scaleInv_fp, cropX_fp, cropY_fp;
+};
+
+CropWindow cropWindowFor(const ContentBox& box, const uint16_t thumbW, const uint16_t thumbH) {
+  const float scale = std::max(static_cast<float>(thumbW) / box.w, static_cast<float>(thumbH) / box.h);
+  CropWindow c{};
+  c.scaleInv_fp = static_cast<uint32_t>(65536.0f / scale);
+  const uint64_t boxW_fp = static_cast<uint64_t>(box.w) << 16;
+  const uint64_t boxH_fp = static_cast<uint64_t>(box.h) << 16;
+  const uint64_t visibleW_fp = static_cast<uint64_t>(thumbW) * c.scaleInv_fp;
+  const uint64_t visibleH_fp = static_cast<uint64_t>(thumbH) * c.scaleInv_fp;
+  c.cropX_fp = static_cast<uint32_t>((static_cast<uint64_t>(box.x) << 16) +
+                                     (boxW_fp > visibleW_fp ? (boxW_fp - visibleW_fp) / 2 : 0));
+  c.cropY_fp = static_cast<uint32_t>((static_cast<uint64_t>(box.y) << 16) +
+                                     (boxH_fp > visibleH_fp ? (boxH_fp - visibleH_fp) / 2 : 0));
+  return c;
+}
+
 bool readXtchSourceRow(FsFile& source, const size_t rowBytes, const uint16_t y, uint8_t* row) {
   const uint32_t offset = sizeof(XtchSourceCacheHeader) + static_cast<uint32_t>(y) * rowBytes;
   return source.seek(offset) && readExact(source, row, rowBytes);
@@ -503,7 +556,9 @@ bool Xtc::generateCoverBmp() const {
   return true;
 }
 
-std::string Xtc::getThumbBmpPath() const { return cachePath + "/thumb_[HEIGHT].bmp"; }
+// Crossblot: "thumbt_" = margin-trimmed thumbs; the new name makes thumbs
+// generated before trimming regenerate once.
+std::string Xtc::getThumbBmpPath() const { return cachePath + "/thumbt_[HEIGHT].bmp"; }
 std::string Xtc::getThumbBmpPath(uint16_t height) const {
   // Height-only home themes resolve this template with the shared 2:3 cover ratio.
   const uint16_t width = static_cast<uint16_t>((static_cast<uint32_t>(height) * 2 + 1) / 3);
@@ -512,7 +567,7 @@ std::string Xtc::getThumbBmpPath(uint16_t height) const {
     return newPath;
   }
 
-  const std::string legacyPath = cachePath + "/thumb_" + std::to_string(height) + ".bmp";
+  const std::string legacyPath = cachePath + "/thumbt_" + std::to_string(height) + ".bmp";
   if (Storage.exists(legacyPath.c_str())) {
     return legacyPath;
   }
@@ -520,7 +575,7 @@ std::string Xtc::getThumbBmpPath(uint16_t height) const {
   return newPath;
 }
 std::string Xtc::getThumbBmpPath(uint16_t width, uint16_t height) const {
-  return cachePath + "/thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
+  return cachePath + "/thumbt_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
 }
 
 bool Xtc::generateThumbBmp() const {
@@ -574,9 +629,6 @@ bool Xtc::generateThumbBmp(uint16_t width, uint16_t height) const {
   const uint16_t THUMB_TARGET_WIDTH = width;
   const uint16_t THUMB_TARGET_HEIGHT = height;
 
-  const float scaleX = static_cast<float>(THUMB_TARGET_WIDTH) / pageInfo.width;
-  const float scaleY = static_cast<float>(THUMB_TARGET_HEIGHT) / pageInfo.height;
-  const float scale = std::max(scaleX, scaleY);
   const uint16_t thumbWidth = THUMB_TARGET_WIDTH;
   const uint16_t thumbHeight = THUMB_TARGET_HEIGHT;
 
@@ -610,17 +662,39 @@ bool Xtc::generateThumbBmp(uint16_t width, uint16_t height) const {
 
     BmpHeader bmpHeader;
     createBmpHeader(&bmpHeader, thumbWidth, thumbHeight, BmpRowOrder::TopDown);
-    const uint32_t scaleInv_fp = static_cast<uint32_t>(65536.0f / scale);
-    const uint64_t srcWidth_fp = static_cast<uint64_t>(pageInfo.width) << 16;
-    const uint64_t srcHeight_fp = static_cast<uint64_t>(pageInfo.height) << 16;
-    const uint64_t visibleWidth_fp = static_cast<uint64_t>(thumbWidth) * scaleInv_fp;
-    const uint64_t visibleHeight_fp = static_cast<uint64_t>(thumbHeight) * scaleInv_fp;
-    const uint32_t cropX_fp =
-        static_cast<uint32_t>(srcWidth_fp > visibleWidth_fp ? (srcWidth_fp - visibleWidth_fp) / 2 : 0);
-    const uint32_t cropY_fp =
-        static_cast<uint32_t>(srcHeight_fp > visibleHeight_fp ? (srcHeight_fp - visibleHeight_fp) / 2 : 0);
-    bool success = writeExact(thumbBmp, reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
     uint8_t rowsSinceYield = 0;
+
+    // Content-box prepass (one extra read of the cached cover page).
+    ContentBox box{0, 0, pageInfo.width, pageInfo.height};
+    {
+      auto rowInk = makeUniqueNoThrow<uint16_t[]>(pageInfo.height);
+      auto colInk = makeUniqueNoThrow<uint16_t[]>(pageInfo.width);
+      if (rowInk && colInk) {
+        memset(rowInk.get(), 0, sizeof(uint16_t) * pageInfo.height);
+        memset(colInk.get(), 0, sizeof(uint16_t) * pageInfo.width);
+        bool scanned = true;
+        for (uint16_t y = 0; scanned && y < pageInfo.height; ++y) {
+          if (!readXtchSourceRow(source, sourceRowBytes, y, sourceRow.get())) {
+            scanned = false;
+            break;
+          }
+          for (uint16_t x = 0; x < pageInfo.width; ++x) {
+            const uint8_t pixel = static_cast<uint8_t>((sourceRow[x / 4] >> (6 - (x % 4) * 2)) & 0x03);
+            if (XTH_TO_GRAY[pixel] < 230) {
+              rowInk[y]++;
+              colInk[x]++;
+            }
+          }
+          yieldDuringThumbnail(rowsSinceYield);
+        }
+        if (scanned) box = trimToContent(pageInfo.width, pageInfo.height, rowInk.get(), colInk.get());
+      }
+    }
+    const CropWindow crop = cropWindowFor(box, thumbWidth, thumbHeight);
+    const uint32_t scaleInv_fp = crop.scaleInv_fp;
+    const uint32_t cropX_fp = crop.cropX_fp;
+    const uint32_t cropY_fp = crop.cropY_fp;
+    bool success = writeExact(thumbBmp, reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
 
     for (uint16_t dstY = 0; success && dstY < thumbHeight; ++dstY) {
       uint32_t srcYStart = (cropY_fp + static_cast<uint32_t>(dstY) * scaleInv_fp) >> 16;
@@ -707,21 +781,52 @@ bool Xtc::generateThumbBmp(uint16_t width, uint16_t height) const {
   createBmpHeader(&bmpHeader, thumbWidth, thumbHeight, BmpRowOrder::TopDown);
   thumbBmp.write(reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(BmpHeader));
 
-  const uint32_t scaleInv_fp = static_cast<uint32_t>(65536.0f / scale);
-  const uint64_t srcWidth_fp = static_cast<uint64_t>(pageInfo.width) << 16;
-  const uint64_t srcHeight_fp = static_cast<uint64_t>(pageInfo.height) << 16;
-  const uint64_t visibleWidth_fp = static_cast<uint64_t>(thumbWidth) * scaleInv_fp;
-  const uint64_t visibleHeight_fp = static_cast<uint64_t>(thumbHeight) * scaleInv_fp;
-  const uint32_t cropX_fp =
-      static_cast<uint32_t>(srcWidth_fp > visibleWidth_fp ? (srcWidth_fp - visibleWidth_fp) / 2 : 0);
-  const uint32_t cropY_fp =
-      static_cast<uint32_t>(srcHeight_fp > visibleHeight_fp ? (srcHeight_fp - visibleHeight_fp) / 2 : 0);
   const size_t planeSize = (bitDepth == 2) ? ((static_cast<size_t>(pageInfo.width) * pageInfo.height + 7) / 8) : 0;
   const uint8_t* plane1 = (bitDepth == 2) ? pageBuffer : nullptr;
   const uint8_t* plane2 = (bitDepth == 2) ? pageBuffer + planeSize : nullptr;
   const size_t colBytes = (bitDepth == 2) ? ((pageInfo.height + 7) / 8) : 0;
   const size_t srcRowBytes = (bitDepth == 1) ? ((pageInfo.width + 7) / 8) : 0;
   uint8_t rowsSinceYield = 0;
+
+  const auto grayAt = [&](const uint32_t srcX, const uint32_t srcY) -> uint8_t {
+    if (bitDepth == 2) {
+      const size_t colIndex = pageInfo.width - 1 - srcX;
+      const size_t byteOffset = colIndex * colBytes + srcY / 8;
+      if (byteOffset >= planeSize) return 255;
+      const size_t bitInByte = 7 - (srcY % 8);
+      const uint8_t bit1 = (plane1[byteOffset] >> bitInByte) & 1;
+      const uint8_t bit2 = (plane2[byteOffset] >> bitInByte) & 1;
+      return XTH_TO_GRAY[(bit1 << 1) | bit2];
+    }
+    const size_t byteIdx = srcY * srcRowBytes + srcX / 8;
+    if (byteIdx >= bitmapSize) return 255;
+    return ((pageBuffer[byteIdx] >> (7 - (srcX % 8))) & 1) ? 255 : 0;
+  };
+
+  // Content-box prepass over the in-memory cover page.
+  ContentBox box{0, 0, pageInfo.width, pageInfo.height};
+  {
+    auto rowInk = makeUniqueNoThrow<uint16_t[]>(pageInfo.height);
+    auto colInk = makeUniqueNoThrow<uint16_t[]>(pageInfo.width);
+    if (rowInk && colInk) {
+      memset(rowInk.get(), 0, sizeof(uint16_t) * pageInfo.height);
+      memset(colInk.get(), 0, sizeof(uint16_t) * pageInfo.width);
+      for (uint32_t y = 0; y < pageInfo.height; ++y) {
+        for (uint32_t x = 0; x < pageInfo.width; ++x) {
+          if (grayAt(x, y) < 230) {
+            rowInk[y]++;
+            colInk[x]++;
+          }
+        }
+        yieldDuringThumbnail(rowsSinceYield);
+      }
+      box = trimToContent(pageInfo.width, pageInfo.height, rowInk.get(), colInk.get());
+    }
+  }
+  const CropWindow crop = cropWindowFor(box, thumbWidth, thumbHeight);
+  const uint32_t scaleInv_fp = crop.scaleInv_fp;
+  const uint32_t cropX_fp = crop.cropX_fp;
+  const uint32_t cropY_fp = crop.cropY_fp;
 
   for (uint16_t dstY = 0; dstY < thumbHeight; dstY++) {
     memset(rowBuffer, 0xFF, rowSize);
