@@ -811,6 +811,17 @@ bool CrossPointSettings::loadFromFile() {
         std::lock_guard<std::mutex> storeLock(storeMutex);
         resaveRequested = false;
         result = fromJson(doc.as<JsonVariantConst>(), migrateToCurrentPath);
+        // Crossblot: CrumBLE also wrote /.crosspoint/settings.json but numbers
+        // its themes differently (Flow is 3 there, RoundedRaff here). Its file
+        // is recognisable by the CrumBLE-only tap-to-cycle key.
+        if (result && migrateToCurrentPath && !doc["cycleScreensaverOnTap"].isNull()) {
+          static constexpr uint8_t kCrumbleThemeMap[] = {CLASSIC,     LYRA,          LYRA_3_COVERS, LYRA_FLOW,
+                                                         ROUNDEDRAFF, LYRA_CAROUSEL, MINIMAL,       DASHBOARD};
+          const uint8_t crumbleTheme = doc["uiTheme"] | static_cast<uint8_t>(3);
+          uiTheme = crumbleTheme < sizeof(kCrumbleThemeMap) ? kCrumbleThemeMap[crumbleTheme] : LYRA_FLOW;
+          cycleScreensaverOnTap = doc["cycleScreensaverOnTap"] | static_cast<uint8_t>(1);
+          LOG_INF("CPS", "Migrated CrumBLE settings (theme %u -> %u)", crumbleTheme, uiTheme);
+        }
         resave = resaveRequested;
         resaveRequested = false;
       }
