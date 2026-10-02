@@ -337,7 +337,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LYRA_CAROUSEL = 4,
     MINIMAL = 5,
     DASHBOARD = 6,
-    UI_THEME_COUNT = 7
+    LYRA_FLOW = 7,  // Crossblot: CrumBLE's Flow home (carousel + icon bar)
+    UI_THEME_COUNT = 8
   };
   enum RECENT_BOOKS_VIEW { RECENT_BOOKS_LIST = 0, RECENT_BOOKS_GRID = 1, RECENT_BOOKS_VIEW_COUNT };
 

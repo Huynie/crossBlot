@@ -3251,3 +3251,161 @@ void GfxRenderer::setRenderMode(RenderMode mode) {
   }
   renderMode = mode;
 }
+
+// ---- Crossblot: packed 2bpp cover tiles (from CrumBLE, used by LyraFlowTheme) ----
+namespace {
+
+inline void write2bppPacked(uint8_t* row, const int dx, const uint8_t val) {
+  const int shift = 6 - (dx & 3) * 2;
+  const uint8_t mask = static_cast<uint8_t>(0x3u << shift);
+  row[dx >> 2] = static_cast<uint8_t>((row[dx >> 2] & ~mask) | ((val & 0x3u) << shift));
+}
+
+}  // namespace
+
+void GfxRenderer::renderPerspectiveBitmapToPacked2bpp(const Bitmap& bitmap, const int w, const int hL, const int hR,
+                                                      uint8_t* dst) const {
+  if (dst == nullptr) return;
+  if (w <= 0 || hL <= 0 || hR <= 0) return;
+
+  const int srcW = bitmap.getWidth();
+  const int srcH = bitmap.getHeight();
+  if (srcW <= 0 || srcH <= 0) return;
+
+  const int hMax = std::max(hL, hR);
+  const bool topDown = bitmap.isTopDown();
+
+  BitmapScratchLock scratchLock(*this);
+  if (!scratchLock.isLocked()) return;
+
+  const int outputRowSize = (srcW + 3) / 4;
+  if (!ensureBitmapScratchBuffers(outputRowSize, bitmap.getRowBytes())) {
+    return;
+  }
+  auto* outputRow = bitmapScratchOutputRow_;
+  auto* rowBytes = bitmapScratchRowBytes_;
+  const int dstStride = (w + 3) / 4;
+
+  for (int srcY = 0; srcY < srcH; srcY++) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read row %d from bitmap (2bpp prerender tile)", srcY);
+      return;
+    }
+    const int srcRowIndex = topDown ? srcY : (srcH - 1 - srcY);
+
+    for (int dx = 0; dx < w; dx++) {
+      const int colH = (w == 1) ? hL : (hL + (hR - hL) * dx / (w - 1));
+      if (colH <= 0) continue;
+      const int colTop = (hMax - colH) / 2;
+
+      const int srcX = (dx * srcW) / w;
+      const uint8_t val = (outputRow[srcX / 4] >> (6 - ((srcX * 2) % 8))) & 0x3;
+
+      const int dstYStart = (srcRowIndex * colH) / srcH;
+      const int dstYEnd = ((srcRowIndex + 1) * colH) / srcH;
+      for (int dy = dstYStart; dy < dstYEnd; ++dy) {
+        const int outY = colTop + dy;
+        if (outY < 0 || outY >= hMax) continue;
+        write2bppPacked(dst + outY * dstStride, dx, val);
+      }
+    }
+  }
+}
+
+void GfxRenderer::drawPacked2bpp(const uint8_t* src, const int srcStride, const int x, const int y, const int w,
+                                 const int h) const {
+  if (src == nullptr || w <= 0 || h <= 0 || srcStride <= 0) return;
+  const int screenW = getScreenWidth();
+  const int screenH = getScreenHeight();
+  // Per-plane logic mirrors drawPerspectiveBitmap (see GfxRenderer.cpp:2256-2262).
+  // Uses the active renderMode to decide which plane to touch per pixel:
+  //   BW           -> paint if val < 3
+  //   GRAYSCALE_MSB -> paint if val is 1 or 2 (medium tones)
+  //   GRAYSCALE_LSB -> paint if val is 1 (darkest gray)
+  // val == 3 (pure white) is always a no-op; val == 0 (pure black) only
+  // paints in BW mode.
+  for (int row = 0; row < h; ++row) {
+    const int dstY = y + row;
+    if (dstY < 0 || dstY >= screenH) continue;
+    const uint8_t* srcRow = src + row * srcStride;
+    for (int col = 0; col < w; ++col) {
+      const int dstX = x + col;
+      if (dstX < 0 || dstX >= screenW) continue;
+      const uint8_t val = (srcRow[col >> 2] >> (6 - ((col & 3) * 2))) & 0x3;
+      if (renderMode == BW && val < 3) {
+        drawPixel(dstX, dstY);
+      } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
+        drawPixel(dstX, dstY, false);
+      } else if (renderMode == GRAYSCALE_LSB && val == 1) {
+        drawPixel(dstX, dstY, false);
+      }
+    }
+  }
+}
+
+void GfxRenderer::renderBitmapToPacked2bpp(const Bitmap& bitmap, const int dstW, const int dstH,
+                                            uint8_t* dst, const float cropX, const float cropY) const {
+  if (dst == nullptr) return;
+  if (dstW <= 0 || dstH <= 0) return;
+  const int srcW = bitmap.getWidth();
+  const int srcH = bitmap.getHeight();
+  if (srcW <= 0 || srcH <= 0) return;
+
+  BitmapScratchLock scratchLock(*this);
+  if (!scratchLock.isLocked()) return;
+
+  const int outputRowSize = (srcW + 3) / 4;
+  if (!ensureBitmapScratchBuffers(outputRowSize, bitmap.getRowBytes())) return;
+  auto* outputRow = bitmapScratchOutputRow_;
+  auto* rowBytes = bitmapScratchRowBytes_;
+  const int dstStride = (dstW + 3) / 4;
+
+  // Streaming variant: read source rows one at a time, distribute each
+  // source row to the dst row range it covers. Matches drawPerspectiveBitmap's
+  // "for each srcY, compute dstYStart/End" pattern for consistency.
+  //
+  // Aspect-fit scaling with crop: same math as buildScaledBitmap. Because
+  // we're streaming (can't random-access source rows), we invert the
+  // mapping -- given srcY, compute which dst rows sample from it.
+  const float clampedCropX = std::clamp(cropX, 0.0f, 0.99f);
+  const float clampedCropY = std::clamp(cropY, 0.0f, 0.99f);
+  const float visibleSrcW = static_cast<float>(srcW) * (1.0f - clampedCropX);
+  const float visibleSrcH = static_cast<float>(srcH) * (1.0f - clampedCropY);
+  const float srcXOffset = static_cast<float>(srcW) * clampedCropX * 0.5f;
+  const float srcYOffset = static_cast<float>(srcH) * clampedCropY * 0.5f;
+  const float xRatio = visibleSrcW / static_cast<float>(dstW);
+  const float yRatio = visibleSrcH / static_cast<float>(dstH);
+
+  // Pre-compute for each dst row which source row it wants (top-down mapping);
+  // as we stream, we buffer the current source row and copy-out to any dst
+  // rows whose target srcY matches. Simplest robust approach: build a
+  // targetY->srcY table up front, then during streaming for each srcRenderY
+  // find the dstY that maps to it and fill that dst row.
+  //
+  // Memory: temporary uint16_t[dstH] table = 2 * dstH bytes (~640 B for
+  // dstH=320). Transient, small.
+  std::unique_ptr<uint16_t[]> dstToSrcRow(new (std::nothrow) uint16_t[dstH]);
+  if (!dstToSrcRow) return;
+  for (int ty = 0; ty < dstH; ++ty) {
+    const int srcRenderY = static_cast<int>(srcYOffset + ty * yRatio);
+    dstToSrcRow[ty] = static_cast<uint16_t>(std::clamp(srcRenderY, 0, srcH - 1));
+  }
+
+  for (int srcY = 0; srcY < srcH; srcY++) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read row %d from bitmap (2bpp center tile)", srcY);
+      return;
+    }
+    const int srcRowIndex = bitmap.isTopDown() ? srcY : (srcH - 1 - srcY);
+    // For each dst row that samples from this source row, fill it.
+    for (int ty = 0; ty < dstH; ++ty) {
+      if (dstToSrcRow[ty] != srcRowIndex) continue;
+      uint8_t* dstRowPtr = dst + ty * dstStride;
+      for (int tx = 0; tx < dstW; ++tx) {
+        const int srcX = std::clamp(static_cast<int>(srcXOffset + tx * xRatio), 0, srcW - 1);
+        const uint8_t val = (outputRow[srcX / 4] >> (6 - ((srcX * 2) % 8))) & 0x3;
+        write2bppPacked(dstRowPtr, tx, val);
+      }
+    }
+  }
+}

@@ -268,6 +268,13 @@ class GfxRenderer {
   // Trapezoidal blit used by Flow/iPod-style carousels. Fits the bitmap into a
   // bounding box of width `w` and height `max(hL, hR)` whose top-left is (x, y).
   void drawPerspectiveBitmap(const Bitmap& bitmap, int x, int y, int w, int hL, int hR) const;
+  // Crossblot (from CrumBLE): render a bitmap into a caller-owned packed 2bpp
+  // buffer (4 px/byte, MSB-first, 0=black..3=white) so LyraFlowTheme can bake
+  // carousel tiles to SD and blit them later with drawPacked2bpp().
+  void renderPerspectiveBitmapToPacked2bpp(const Bitmap& bitmap, int w, int hL, int hR, uint8_t* dst) const;
+  void renderBitmapToPacked2bpp(const Bitmap& bitmap, int dstW, int dstH, uint8_t* dst, float cropX = 0.0f,
+                                float cropY = 0.0f) const;
+  void drawPacked2bpp(const uint8_t* src, int srcStride, int x, int y, int w, int h) const;
   void fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state = true) const;
   // Snapshot / restore a screen-coordinate framebuffer region. The renderer
   // byte-aligns the panel-memory rectangle internally, so callers must pass the

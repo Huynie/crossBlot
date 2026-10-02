@@ -353,6 +353,14 @@ bool isDashboardTheme() {
 
 bool usesMinimalHomeInteraction() { return isMinimalTheme() || isDashboardTheme(); }
 
+// Crossblot: Flow shares Lyra Carousel's row-and-column navigation (L/R moves
+// through covers or icons, Up/Down switches rows) but draws itself, so it does
+// not use Carousel's pre-rendered frame cache.
+bool usesCarouselNavigation() {
+  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
+  return theme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL || theme == CrossPointSettings::UI_THEME::LYRA_FLOW;
+}
+
 bool showMinimalHomeButtonHints(const MappedInputManager& mappedInput) { return !mappedInput.hasTouch(); }
 
 bool isAnyFrontButtonPressed(const MappedInputManager& mappedInput) {
@@ -1756,8 +1764,7 @@ void HomeActivity::loop() {
     return;
   }
 
-  const bool isCarousel =
-      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
+  const bool isCarousel = usesCarouselNavigation();
   const bool carouselTouchOnly = isCarousel && mappedInput.hasTouchHardware();
   const int previousHighlightedBookIdx = getHighlightedBookIndex();
   const int visibleBookCount = getVisibleRecentBookCount();
@@ -2276,8 +2283,7 @@ void HomeActivity::render(RenderLock&&) {
   const int menuEndY = pageHeight - metrics.buttonHintsHeight;
   const int menuHeight = std::max(0, menuEndY - menuStartY);
 
-  const bool isCarouselTheme =
-      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
+  const bool isCarouselTheme = usesCarouselNavigation();
   const int menuSelectedIndex = isCarouselTheme && mappedInput.hasTouchHardware()
                                     ? carouselMenuTouchDownIndex
                                     : selectorIndex - getHomeMenuSelectionOffset(recentBooks);
@@ -2357,8 +2363,7 @@ void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 void HomeActivity::onContinueReading() {
   if (recentBooks.empty()) return;
 
-  const bool isCarousel =
-      static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
+  const bool isCarousel = usesCarouselNavigation();
   const int bookIndex = isCarousel ? getHighlightedBookIndex() : 0;
   if (bookIndex >= 0 && bookIndex < static_cast<int>(recentBooks.size())) {
     onSelectBook(recentBooks[bookIndex].path);
