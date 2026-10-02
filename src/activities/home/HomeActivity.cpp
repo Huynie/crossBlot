@@ -39,6 +39,7 @@
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
+#include "components/themes/lyra/DuetCarouselTheme.h"
 #include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
@@ -364,7 +365,15 @@ bool usesMinimalHomeInteraction() { return isMinimalTheme() || isDashboardTheme(
 // not use Carousel's pre-rendered frame cache.
 bool usesCarouselNavigation() {
   const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
-  return theme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL || theme == CrossPointSettings::UI_THEME::LYRA_FLOW;
+  return theme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL || theme == CrossPointSettings::UI_THEME::LYRA_FLOW ||
+         theme == CrossPointSettings::UI_THEME::DUET_CAROUSEL;
+}
+
+// Themes that draw the carousel themselves (Flow, Duet Carousel) and decode
+// "bookCount + index" as "keep this book centred, no selection ring".
+bool drawsOwnCarousel() {
+  const auto theme = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);
+  return theme == CrossPointSettings::UI_THEME::LYRA_FLOW || theme == CrossPointSettings::UI_THEME::DUET_CAROUSEL;
 }
 
 bool showMinimalHomeButtonHints(const MappedInputManager& mappedInput) { return !mappedInput.hasTouch(); }
@@ -617,6 +626,8 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
               "kMaxCachedBooks must cover all carousel slots");
 static_assert(HomeActivity::kMaxCachedBooks >= LyraFlowMetrics::values.homeRecentBooksCount,
               "kMaxCachedBooks must cover all Flow carousel slots");
+static_assert(HomeActivity::kMaxCachedBooks >= DuetCarouselMetrics::values.homeRecentBooksCount,
+              "kMaxCachedBooks must cover all Duet carousel slots");
 
 int HomeActivity::getMenuItemCount() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -2306,7 +2317,7 @@ void HomeActivity::render(RenderLock&&) {
   // Flow decodes (bookCount + index) as "keep this book centred, no selection
   // border", which holds the carousel still while the cursor is elsewhere.
   const int flowBookCount = static_cast<int>(recentBooks.size());
-  const bool flowOffCarousel = flowThemeActive() && (shelfFocus != ShelfFocus::None || selectorIndex >= flowBookCount);
+  const bool flowOffCarousel = drawsOwnCarousel() && (shelfFocus != ShelfFocus::None || selectorIndex >= flowBookCount);
   const int coverSelectorIndex =
       flowOffCarousel && flowBookCount > 0
           ? flowBookCount + std::clamp(lastCarouselBookIndex, 0, flowBookCount - 1)
