@@ -240,6 +240,12 @@ class CollectionsStore {
   // them. Loading is a few small JSON reads; no SD walk.
   static void loadLibraryStores();
   static void releaseLibraryStores();
+  // Crossblot: saveToFile() only marks the store dirty; these do the write.
+  // tickDeferredSave() runs from the main loop (debounced); flushPendingSave()
+  // writes now (before sleep or releasing the store). Both no-op when the
+  // store is not loaded.
+  static void tickDeferredSave();
+  static void flushPendingSave();
 
   // CrumBLE: re-sort the in-memory collections vector to match the given id
   // sequence and persist the new order. IDs present in the vector but not

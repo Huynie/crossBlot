@@ -1075,6 +1075,7 @@ void CollectionsStore::flushDeferredSaveNowBypassGate() const {
   serializeJson(doc, json);
   const bool ok = writeFileWithBackup(COLLECTIONS_FILE, json);
   gCollectionsSaveDeferred = !ok;
+  if (ok) gCollectionsPendingWrite = false;  // Crossblot: the debounced write is now done too
   LOG_INF("CLN", "Bypass-gate flush result: %s (wrote %u bytes)",
           ok ? "OK" : "FAILED", static_cast<unsigned>(json.length()));
 }
@@ -1090,6 +1091,15 @@ bool CollectionsStore::saveToFile() const {
 }
 
 bool CollectionsStore::writeToDiskNow_() const {
+  // Crossblot: the store may have been released (collections cleared) while a
+  // save was still pending. Writing then would wipe collections.json; the
+  // real data always includes at least Favorites.
+  if (collections.empty()) {
+    gCollectionsPendingWrite = false;
+    gCollectionsSaveDeferred = false;
+    LOG_ERR("CLN", "Refusing to write an empty collections.json (store not loaded)");
+    return false;
+  }
   Storage.mkdir("/.crosspoint");
 
   JsonDocument doc;
@@ -1158,8 +1168,20 @@ void CollectionsStore::loadLibraryStores() {
   if (instance.collections.empty()) instance.begin();
 }
 
+void CollectionsStore::flushPendingSave() {
+  if (!instance.collections.empty()) instance.flushDeferredSaveNowBypassGate();
+}
+
+void CollectionsStore::tickDeferredSave() {
+  if (!instance.collections.empty()) instance.retryDeferredSaveIfNeeded();
+}
+
 void CollectionsStore::releaseLibraryStores() {
-  instance.releaseMemory();
+  // Write pending edits before dropping them. If the write could not happen
+  // (very low heap), keep the collections in RAM so the change isn't lost;
+  // the main-loop tick retries it.
+  flushPendingSave();
+  if (!hasDeferredSave()) instance.releaseMemory();
   SeriesIndex::getInstance().releaseMemory();
   LibraryIndex::getInstance().releaseMemory();
 }

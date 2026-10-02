@@ -88,6 +88,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
+#include "CollectionsStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/boot_sleep/ImageFolderIndex.h"
@@ -1211,6 +1212,9 @@ void enterDeepSleep(bool fromTimeout) {
 
   APP_STATE.saveToFile();
 
+  // Crossblot: deep sleep wipes RAM; write any pending collection edits.
+  CollectionsStore::flushPendingSave();
+
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
@@ -1753,6 +1757,8 @@ void loop() {
   }
 
   renderer.setFadingFix(SETTINGS.fadingFix);
+  // Crossblot: commit debounced collection edits.
+  CollectionsStore::tickDeferredSave();
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     logMemoryStats("Periodic");
