@@ -16,7 +16,7 @@
 #include "CrossPointState.h"
 #include "ImageFolderIndex.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
+#include "images/CrossblotLogo.h"
 
 namespace {
 
@@ -119,10 +119,17 @@ void drawDefaultBootLogo(const GfxRenderer& renderer) {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSINK), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSINK_VERSION);
+  // Crossblot: the ink-blot logo centred, product + version at the bottom.
+  const int logoX = (pageWidth - kCrossblotLogoWidth) / 2;
+  const int logoY = (pageHeight - kCrossblotLogoHeight) / 2;
+  constexpr int logoRowBytes = (kCrossblotLogoWidth + 7) / 8;
+  for (int y = 0; y < kCrossblotLogoHeight; ++y) {
+    const uint8_t* row = CrossblotLogo + y * logoRowBytes;
+    for (int x = 0; x < kCrossblotLogoWidth; ++x) {
+      if (row[x / 8] & (0x80 >> (x % 8))) renderer.drawPixel(logoX + x, logoY + y, true);
+    }
+  }
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, "CrossBlot v" CROSSBLOT_VERSION);
 }
 
 }  // namespace

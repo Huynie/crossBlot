@@ -21,3 +21,9 @@
 #ifndef CROSSINK_FIRMWARE_DEVICE_TYPE
 #define CROSSINK_FIRMWARE_DEVICE_TYPE "unknown"
 #endif
+
+// Crossblot's own release version (CROSSINK_VERSION keeps tracking the CrossInk
+// base for OTA/compatibility checks).
+#ifndef CROSSBLOT_VERSION
+#define CROSSBLOT_VERSION "1.0.0"
+#endif
