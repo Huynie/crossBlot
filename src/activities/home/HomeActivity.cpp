@@ -884,6 +884,10 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   }
 }
 
+std::string HomeActivity::savedShelfCollectionId;
+int HomeActivity::savedShelfBookIndex = 0;
+int HomeActivity::savedShelfScrollOffset = 0;
+
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
@@ -895,6 +899,10 @@ void HomeActivity::onEnter() {
     // Collection Carousel has no recent-books row: start on its carousel.
     shelfFocus = collectionCarouselActive() ? ShelfFocus::Books : ShelfFocus::None;
     invalidateShelf();
+    if (CollectionsStore::getInstance().getActiveId() == savedShelfCollectionId) {
+      shelfBookIndex = savedShelfBookIndex;
+      shelfScrollOffset = savedShelfScrollOffset;
+    }
   }
 
   hasOpdsServers = OPDS_STORE.hasServers();
@@ -1120,6 +1128,9 @@ void HomeActivity::onExit() {
   Activity::onExit();
 
   if (libraryStoresLoaded) {
+    savedShelfCollectionId = CollectionsStore::getInstance().getActiveId();
+    savedShelfBookIndex = shelfBookIndex;
+    savedShelfScrollOffset = shelfScrollOffset;
     CollectionsStore::releaseLibraryStores();
     libraryStoresLoaded = false;
   }

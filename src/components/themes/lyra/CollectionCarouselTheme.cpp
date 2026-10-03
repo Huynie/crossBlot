@@ -23,6 +23,7 @@ constexpr int kCornerRadius = 6;
 constexpr int kSelectionPadding = 6;
 constexpr int kTitleLines = 2;
 constexpr int kArrowSize = 7;
+constexpr int kProgressBarHeight = 6;
 
 struct Layout {
   int headerY, headerLineH, counterY;
@@ -30,7 +31,7 @@ struct Layout {
   int nearW, nearInnerH, nearOuterH, nearY;
   int farW, farInnerH, farOuterH, farY;
   int leftNearX, rightNearX, leftFarX, rightFarX;
-  int titleY, titleLineH, textW;
+  int progressY, titleY, titleLineH, textW;
 };
 
 // Duet's calculateCoverCarouselLayout, stacked under a collection header.
@@ -66,7 +67,8 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
 
   l.textW = std::max(40, pageWidth - sidePadding * 2);
   l.titleLineH = renderer.getLineHeight(UI_12_FONT_ID);
-  l.titleY = l.centerY + l.centerH + kSelectionPadding + 22;  // breathing room above the title
+  l.progressY = l.centerY + l.centerH + kSelectionPadding + 14;
+  l.titleY = l.progressY + kProgressBarHeight + 14;  // breathing room above the title
   return l;
 }
 
@@ -264,7 +266,18 @@ void CollectionCarouselTheme::drawCollectionCarousel(GfxRenderer& renderer, cons
   // Duet's double selection ring while the carousel row has focus.
   if (carouselFocused) drawSelectionRing(renderer, l);
 
-  // Footer: title (two lines), author, position.
+  // Reading progress under the cover: outline always, filled by percent.
+  {
+    const int pct =
+        center.progressPercent > 0.0f ? std::clamp(static_cast<int>(center.progressPercent + 0.5f), 1, 100) : 0;
+    renderer.drawRect(l.centerX, l.progressY, l.centerW, kProgressBarHeight, true);
+    if (pct > 0) {
+      const int filled = std::max(1, ((l.centerW - 2) * pct) / 100);
+      renderer.fillRect(l.centerX + 1, l.progressY + 1, filled, kProgressBarHeight - 2, true);
+    }
+  }
+
+  // Footer: title (two lines), author.
   int y = l.titleY;
   for (const auto& line :
        renderer.wrappedText(UI_12_FONT_ID, center.title.c_str(), l.textW, kTitleLines, EpdFontFamily::BOLD)) {

@@ -20,6 +20,7 @@
 #include "HomeActivity.h"
 #include "LibraryIndex.h"
 #include "MappedInputManager.h"
+#include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
 #include "activities/ActivityManager.h"
 #include "activities/home/AddBooksToCollectionActivity.h"
@@ -217,6 +218,12 @@ void HomeActivity::updateFocusedShelfMeta(const std::string& path) {
     }
   }
   if (focusedMetaTitle.empty()) focusedMetaTitle = displayNameFromPath(path);
+
+  // Reading progress (finished books count as 100%).
+  RecentBook book;
+  book.path = path;
+  focusedMetaProgress = RecentBookProgress::loadPercent(book);
+  if (FsHelpers::hasEpubExtension(path) && BookActions::isBookCompleted(path)) focusedMetaProgress = 100.0f;
 }
 
 void HomeActivity::renderFlowShelf(const int pageWidth, const int pageHeight) {
@@ -839,6 +846,7 @@ void HomeActivity::renderCollectionCarousel(const int pageWidth, const int pageH
     if (index == shelfBookIndex) {
       item.title = focusedMetaTitle;
       item.author = focusedMetaAuthor;
+      item.progressPercent = focusedMetaProgress;
     } else {
       item.title = displayNameFromPath(path);
     }

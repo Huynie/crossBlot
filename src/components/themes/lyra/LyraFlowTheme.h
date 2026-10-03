@@ -16,6 +16,7 @@ constexpr ThemeMetrics values = [] {
   ThemeMetrics v = LyraMetrics::values;
   // Crossblot: black (inverted) selection in FreeInkUI lists too, not Lyra's gray pill.
   v.listSelectionStyle = 0;
+  v.optionPopupSelectionLight = false;  // pop-up menus: black selected row too
   v.homeCoverHeight = 320;       // 25-kai book ratio (~0.7) — center cover
   v.homeCoverTileHeight = 360;   // hugs the bottom of the cover so the menu sits close
   v.homeRecentBooksCount = 5;    // matches the 5 carousel slots visible at once

@@ -26,6 +26,7 @@ class CollectionCarouselTheme : public LyraFlowTheme {
     std::string thumbPath;  // resolved cover thumb at coverSize(); empty = placeholder card
     std::string title;
     std::string author;
+    float progressPercent = -1.0f;  // centre book only; < 0 = unread
   };
 
   // Centre cover size; thumbs for the carousel are generated at exactly this.
