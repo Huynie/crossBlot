@@ -36,6 +36,7 @@
 #include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
 #include "SavedItemsHomeActivity.h"
+#include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
@@ -2431,6 +2432,20 @@ void HomeActivity::onSelectBook(const std::string& path) {
   if (Storage.exists(CAROUSEL_CACHE_TMP_PATH)) {
     Storage.remove(CAROUSEL_CACHE_TMP_PATH);
   }
+#ifndef SIMULATOR
+  // Crossblot: the Flow-family Home churns large cover buffers, which can leave
+  // the heap too fragmented for a 48 KB XTC page or chapter layout. Below this
+  // contiguous floor, reboot straight into the book (CrossInk's silent restart)
+  // instead of opening it on the fragmented heap.
+  constexpr uint32_t kReaderMinContiguousHeap = 64u * 1024u;
+  if ((flowThemeActive() || collectionCarouselActive()) && ESP.getMaxAllocHeap() < kReaderMinContiguousHeap) {
+    LOG_INF("HOME", "Opening %s via silent restart (maxAlloc=%u)", path.c_str(), ESP.getMaxAllocHeap());
+    APP_STATE.openEpubPath = path;
+    APP_STATE.saveToFile();
+    silentRestartToReader();
+    return;
+  }
+#endif
   activityManager.goToReader(path);
 }
 

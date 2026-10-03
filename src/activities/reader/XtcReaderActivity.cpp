@@ -31,6 +31,32 @@
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "SilentRestart.h"
+
+namespace {
+// Crossblot: a fragmented heap can fail an XTC page allocation even with plenty
+// of free memory. Retry once from a fresh heap (silent restart back into this
+// book) before showing "Memory error". The RTC token survives the restart so a
+// genuine out-of-memory can't loop.
+#ifdef SIMULATOR
+uint32_t gXtcLowMemRestartToken = 0;
+#else
+RTC_NOINIT_ATTR uint32_t gXtcLowMemRestartToken;
+#endif
+constexpr uint32_t kXtcLowMemRestartToken = 0x584D5254;  // "XMRT"
+
+bool restartForXtcLowMemory() {
+  if (gXtcLowMemRestartToken == kXtcLowMemRestartToken) {
+    gXtcLowMemRestartToken = 0;  // already retried from a fresh heap
+    return false;
+  }
+  LOG_ERR("XTR", "Page allocation failed (free=%u maxAlloc=%u); silent restart to retry", ESP.getFreeHeap(),
+          ESP.getMaxAllocHeap());
+  gXtcLowMemRestartToken = kXtcLowMemRestartToken;
+  silentRestartToReader();
+  return true;
+}
+}  // namespace
 
 namespace {
 constexpr unsigned long MIN_READING_STATS_PAGE_MS = 2000UL;
@@ -1190,6 +1216,7 @@ void XtcReaderActivity::renderPage(const uint32_t pageToRender) {
 
   if (bitDepth == 2) {
     auto showStreamError = [&]() {
+      if (xtc->getLastError() == xtc::XtcError::MEMORY_ERROR && restartForXtcLowMemory()) return;
       renderer.clearScreen();
       const char* message =
           xtc->getLastError() == xtc::XtcError::MEMORY_ERROR ? tr(STR_MEMORY_ERROR) : tr(STR_PAGE_LOAD_ERROR);
@@ -1214,6 +1241,7 @@ void XtcReaderActivity::renderPage(const uint32_t pageToRender) {
       showStreamError();
       return;
     }
+    gXtcLowMemRestartToken = 0;  // page memory is fine again
     clearHiddenStatusBar();
 
     if (pagesUntilFullRefresh <= 1) {
@@ -1258,6 +1286,8 @@ void XtcReaderActivity::renderPage(const uint32_t pageToRender) {
 
   // Allocate page buffer
   uint8_t* pageBuffer = static_cast<uint8_t*>(malloc(pageBufferSize));
+  if (!pageBuffer && restartForXtcLowMemory()) return;
+  if (pageBuffer) gXtcLowMemRestartToken = 0;  // page memory is fine again
   if (!pageBuffer) {
     LOG_ERR("XTR", "Failed to allocate page buffer (%lu bytes)", pageBufferSize);
     renderer.clearScreen();
