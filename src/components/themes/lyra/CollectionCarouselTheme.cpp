@@ -268,14 +268,15 @@ void CollectionCarouselTheme::drawCollectionCarousel(GfxRenderer& renderer, cons
   // Duet's double selection ring while the carousel row has focus.
   if (carouselFocused) drawSelectionRing(renderer, l);
 
-  // Reading progress under the cover: outline always, filled by percent.
+  // Reading progress under the cover.
   {
     const int pct =
         center.progressPercent > 0.0f ? std::clamp(static_cast<int>(center.progressPercent + 0.5f), 1, 100) : 0;
-    renderer.drawRect(l.centerX, l.progressY, l.centerW, kProgressBarHeight, true);
+    // Borderless: light-gray track, black fill for the part read.
+    renderer.fillRectDither(l.centerX, l.progressY, l.centerW, kProgressBarHeight, Color::LightGray);
     if (pct > 0) {
-      const int filled = std::max(1, ((l.centerW - 2) * pct) / 100);
-      renderer.fillRect(l.centerX + 1, l.progressY + 1, filled, kProgressBarHeight - 2, true);
+      const int filled = std::max(1, (l.centerW * pct) / 100);
+      renderer.fillRect(l.centerX, l.progressY, filled, kProgressBarHeight, true);
     }
     // Time spent on the left, percentage on the right, aligned to the bar.
     if (center.readingSeconds > 0) {
