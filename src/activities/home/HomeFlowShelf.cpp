@@ -23,6 +23,7 @@
 #include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
 #include "activities/ActivityManager.h"
+#include "activities/reader/BookReadingStats.h"
 #include "activities/home/AddBooksToCollectionActivity.h"
 #include "activities/home/BookActions.h"
 #include "activities/home/BookshelfPickerActivity.h"
@@ -223,7 +224,18 @@ void HomeActivity::updateFocusedShelfMeta(const std::string& path) {
   RecentBook book;
   book.path = path;
   focusedMetaProgress = RecentBookProgress::loadPercent(book);
-  if (FsHelpers::hasEpubExtension(path) && BookActions::isBookCompleted(path)) focusedMetaProgress = 100.0f;
+  focusedMetaSeconds = 0;
+  std::string statsCachePath;
+  if (FsHelpers::hasEpubExtension(path)) {
+    statsCachePath = Epub(path, "/.crosspoint").getCachePath();
+  } else if (FsHelpers::hasXtcExtension(path)) {
+    statsCachePath = Xtc(path, "/.crosspoint").getCachePath();
+  }
+  if (!statsCachePath.empty()) {
+    const BookReadingStats stats = BookReadingStats::load(statsCachePath);
+    focusedMetaSeconds = stats.totalReadingSeconds;
+    if (stats.isCompleted) focusedMetaProgress = 100.0f;
+  }
 }
 
 void HomeActivity::renderFlowShelf(const int pageWidth, const int pageHeight) {
@@ -847,6 +859,7 @@ void HomeActivity::renderCollectionCarousel(const int pageWidth, const int pageH
       item.title = focusedMetaTitle;
       item.author = focusedMetaAuthor;
       item.progressPercent = focusedMetaProgress;
+      item.readingSeconds = focusedMetaSeconds;
     } else {
       item.title = displayNameFromPath(path);
     }

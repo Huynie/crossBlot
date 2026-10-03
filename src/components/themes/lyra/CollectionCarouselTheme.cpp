@@ -12,6 +12,7 @@
 #include <string>
 
 #include "CoverTiles.h"
+#include "activities/reader/BookReadingStats.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -31,7 +32,7 @@ struct Layout {
   int nearW, nearInnerH, nearOuterH, nearY;
   int farW, farInnerH, farOuterH, farY;
   int leftNearX, rightNearX, leftFarX, rightFarX;
-  int progressY, titleY, titleLineH, textW;
+  int progressY, progressLabelY, titleY, titleLineH, textW;
 };
 
 // Duet's calculateCoverCarouselLayout, stacked under a collection header.
@@ -68,7 +69,8 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
   l.textW = std::max(40, pageWidth - sidePadding * 2);
   l.titleLineH = renderer.getLineHeight(UI_12_FONT_ID);
   l.progressY = l.centerY + l.centerH + kSelectionPadding + 14;
-  l.titleY = l.progressY + kProgressBarHeight + 14;  // breathing room above the title
+  l.progressLabelY = l.progressY + kProgressBarHeight + 4;
+  l.titleY = l.progressLabelY + renderer.getLineHeight(SMALL_FONT_ID) + 10;  // breathing room above the title
   return l;
 }
 
@@ -275,6 +277,17 @@ void CollectionCarouselTheme::drawCollectionCarousel(GfxRenderer& renderer, cons
       const int filled = std::max(1, ((l.centerW - 2) * pct) / 100);
       renderer.fillRect(l.centerX + 1, l.progressY + 1, filled, kProgressBarHeight - 2, true);
     }
+    // Time spent on the left, percentage on the right, aligned to the bar.
+    if (center.readingSeconds > 0) {
+      char timeText[24];
+      BookReadingStats::formatDuration(center.readingSeconds, timeText, sizeof(timeText));
+      renderer.drawText(SMALL_FONT_ID, l.centerX, l.progressLabelY, timeText, true, EpdFontFamily::REGULAR);
+    }
+    char pctText[8];
+    snprintf(pctText, sizeof(pctText), "%d%%", pct);
+    const int pctW = renderer.getTextWidth(SMALL_FONT_ID, pctText, EpdFontFamily::REGULAR);
+    renderer.drawText(SMALL_FONT_ID, l.centerX + l.centerW - pctW, l.progressLabelY, pctText, true,
+                      EpdFontFamily::REGULAR);
   }
 
   // Footer: title (two lines), author.

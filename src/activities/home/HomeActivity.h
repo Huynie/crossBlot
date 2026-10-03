@@ -154,6 +154,7 @@ class HomeActivity final : public Activity {
   std::string focusedMetaTitle;
   std::string focusedMetaAuthor;
   float focusedMetaProgress = -1.0f;
+  uint32_t focusedMetaSeconds = 0;
   // Shelf / carousel position survives leaving Home (e.g. to read a book).
   static std::string savedShelfCollectionId;
   static int savedShelfBookIndex;
