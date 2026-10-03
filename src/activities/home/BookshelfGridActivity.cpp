@@ -487,7 +487,9 @@ void BookshelfGridActivity::loadPageCovers(int pageStart) {
           // for the same books on every Bookshelf entry.
           book.coverBmpPath = "";
           updateRecentBookCoverPath(book, "");
-          CoverThumbStatus::markFailed(book.path, coverWidth_, coverHeight_);
+          if (CoverThumbStatus::heapHealthyForMarking()) {
+            CoverThumbStatus::markFailed(book.path, coverWidth_, coverHeight_);
+          }
         }
       } else if (FsHelpers::hasXtcExtension(book.path)) {
         Xtc xtc(book.path, "/.crosspoint");
@@ -508,7 +510,9 @@ void BookshelfGridActivity::loadPageCovers(int pageStart) {
           } else {
             book.coverBmpPath = "";
             updateRecentBookCoverPath(book, "");
-            CoverThumbStatus::markFailed(book.path, coverWidth_, coverHeight_);
+            if (CoverThumbStatus::heapHealthyForMarking()) {
+              CoverThumbStatus::markFailed(book.path, coverWidth_, coverHeight_);
+            }
           }
         }
       }

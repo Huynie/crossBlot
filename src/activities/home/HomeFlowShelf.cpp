@@ -190,7 +190,7 @@ void HomeActivity::loadShelfCovers(const int cellWidth, const int cellHeight, co
       failedShelfCovers.push_back(bookPath);
       // Only remember the failure across boots when heap was healthy; a
       // low-heap failure says nothing about the cover itself.
-      if (ESP.getFreeHeap() >= 45u * 1024u) CoverThumbStatus::markFailed(bookPath, cellWidth, cellHeight);
+      if (CoverThumbStatus::heapHealthyForMarking()) CoverThumbStatus::markFailed(bookPath, cellWidth, cellHeight);
       LOG_ERR("HOME", "shelf: thumb generation failed for %s", bookPath.c_str());
     }
   }
@@ -826,7 +826,7 @@ void HomeActivity::loadCarouselCovers(const int coverWidth, const int coverHeigh
     }
     if (!generated || !Storage.exists(resolved.c_str())) {
       failedShelfCovers.push_back(bookPath);
-      if (ESP.getFreeHeap() >= 45u * 1024u) CoverThumbStatus::markFailed(bookPath, coverWidth, coverHeight);
+      if (CoverThumbStatus::heapHealthyForMarking()) CoverThumbStatus::markFailed(bookPath, coverWidth, coverHeight);
     }
   }
   if (showingLoading) requestUpdate();

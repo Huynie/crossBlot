@@ -11,7 +11,7 @@
 // snappy scroll into a stutter.
 //
 // The marker is a zero-byte file at
-// <book cachePath>/thumb_failed_v3_<W>x<H>.marker so it persists across
+// <book cachePath>/thumb_failed_v4_<W>x<H>.marker so it persists across
 // reboots (lives on SD card alongside the book's other cache state).
 // It's cleared whenever a generation attempt for the SAME size succeeds.
 //
@@ -42,7 +42,7 @@ void markFailed(const std::string& bookPath, int width, int height);
 // at; pass the same dimensions that were used in the gen attempt.
 void clearFailed(const std::string& bookPath, int width, int height);
 
-// CrumBLE 4.4: wipe ALL thumb_failed_v3_*.marker files across every
+// CrumBLE 4.4: wipe ALL thumb_failed_v4_*.marker files across every
 // per-book cache dir under /.crosspoint/. Used by:
 //   1. Boot-time auto-sweep after a firmware-version change so users
 //      whose covers broke on a fixed bug (e.g. the EOCD scan window
@@ -53,6 +53,12 @@ void clearFailed(const std::string& bookPath, int width, int height);
 // Returns the count of markers removed. Walks the /.crosspoint/ tree
 // once; cost scales with number of cache subdirs (~10-200 typical).
 int sweepAllMarkers();
+
+// Crossblot: true when the heap is healthy enough that a thumbnail failure is
+// the cover's fault (worth a persistent marker) rather than a memory hiccup.
+// Markers are now *_v4_*: markers written by earlier builds (some under low
+// heap) are ignored, so those covers get one fresh retry.
+bool heapHealthyForMarking();
 
 // CrumBLE 4.6: nuke EVERY cached thumb across all per-book cache dirs (the
 // thumb_<W>x<H>.bmp files). Forces full cover regeneration on next render,

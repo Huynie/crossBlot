@@ -1,5 +1,7 @@
 #include "CoverThumbStatus.h"
 
+#include <Arduino.h>
+
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
@@ -22,7 +24,7 @@ constexpr char kCacheDir[] = "/.crosspoint";
 // regeneration at Carousel@296x468. Old _v2 .marker files leak as
 // zero-byte files on SD -- acceptable; isMarkedFailed only checks the
 // new size-scoped path.
-constexpr char kMarkerPrefix[] = "/thumb_failed_v3_";
+constexpr char kMarkerPrefix[] = "/thumb_failed_v4_";
 constexpr char kMarkerSuffix[] = ".marker";
 
 std::string bookCacheDir(const std::string& bookPath) {
@@ -90,7 +92,7 @@ int sweepAllMarkers() {
   int removed = 0;
   char nameBuf[128];
   // Iterate per-book cache subdirs (epub_* / xtc_*). Each subdir may contain
-  // one or more thumb_failed_v3_<W>x<H>.marker files -- one per size that
+  // one or more thumb_failed_v4_<W>x<H>.marker files -- one per size that
   // failed (Carousel @ 296x468, Collections @ 130x190, etc.).
   for (auto sub = root.openNextFile(); sub; sub = root.openNextFile()) {
     sub.getName(nameBuf, sizeof(nameBuf));
@@ -110,11 +112,11 @@ int sweepAllMarkers() {
     std::vector<std::string> toRemove;
     for (auto f = bookDir.openNextFile(); f; f = bookDir.openNextFile()) {
       f.getName(fileNameBuf, sizeof(fileNameBuf));
-      // Match thumb_failed_v3_*.marker. String::starts_with isn't available;
-      // do a manual prefix + suffix check. The full prefix is "thumb_failed_v3_"
+      // Match thumb_failed_v4_*.marker. String::starts_with isn't available;
+      // do a manual prefix + suffix check. The full prefix is "thumb_failed_v4_"
       // (16 chars including underscore) and suffix is ".marker" (7 chars).
       const std::string filename = fileNameBuf;
-      const std::string prefix = "thumb_failed_v3_";
+      const std::string prefix = "thumb_failed_v4_";
       const std::string suffix = ".marker";
       const bool matches = filename.size() > prefix.size() + suffix.size() &&
                            filename.compare(0, prefix.size(), prefix) == 0 &&
@@ -234,3 +236,9 @@ int regenerateThumbsForBook(const std::string& cacheDir) {
 }
 
 }  // namespace CoverThumbStatus
+
+bool CoverThumbStatus::heapHealthyForMarking() {
+  // Crossblot: only a failure on a healthy heap says anything about the cover
+  // itself; low-memory failures must stay retryable.
+  return ESP.getFreeHeap() >= 45u * 1024u && ESP.getMaxAllocHeap() >= 32u * 1024u;
+}
