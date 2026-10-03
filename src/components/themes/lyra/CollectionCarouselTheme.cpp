@@ -22,7 +22,7 @@ constexpr int kCoverAspectW = 123;
 constexpr int kCoverAspectH = 180;
 constexpr int kCornerRadius = 6;
 constexpr int kSelectionPadding = 6;
-constexpr int kTitleLines = 2;
+constexpr int kTitleLines = 1;  // long titles truncate with an ellipsis
 constexpr int kArrowSize = 7;
 constexpr int kProgressBarHeight = 6;
 
