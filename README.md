@@ -1,173 +1,153 @@
-> **This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)** with a focus on improved fonts and minimal reading stats.
+# CrossBlot
 
-### Supported Devices
+CrossBlot is a personal e-reader firmware for the **Xteink X3** (it also runs on the X4, which shares the same binary).
 
-- Xteink X3
-- Xteink X4
-- Xteink X4 Pro
-- Xteink X4 Classic
-- Seeed Studio Sticky
+It started as an experiment in combining the parts I liked most from several community firmwares in the CrossPoint family into one build:
 
-## What's different in this fork
+- the lightweight core and working network features of one,
+- the library and home-screen polish of another,
+- the cover carousel and button layout of two more.
 
-My goal with this fork was to maintain the core Crosspoint firmware while integrating my preferred typography and some lightweight reading statistics. I’ve focused on keeping the underlying system stable while layering in a few "nice-to-have" features and UI refinements along the way.
+CrossBlot is built on **CrossInk v1.6.0**. Pieces from the other projects were ported on top of it, adapted, and in places reworked.
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="./docs/images/bitter-small-15-margin.jpg" alt="Font: Bitter, Size: 12 pt, Margin: 15" /><br/>
-      <em>Font: Bitter, Size: 12 pt, Margin: 15</em>
-    </td>
-    <td align="center">
-      <img src="./docs/images/reading-stats.jpg" alt="Reading Stats with custom front button mapping shown" /><br/>
-      <em>Reading Stats with custom front button mapping shown</em>
-    </td>
-  </tr>
-</table>
-
-### Highlights
-
-- New reader fonts: Lexend Deca and Bitter.
-- Music notation and selected supplemental Unicode glyph support to be able to render Project Hail Mary accurately.
-- Added a custom `Minimal` theme and sleep screen option for the minimalists out there.
-- Added a custom `Dashboard` theme and sleep screen option for reading stats enthusiasts.
-- Reader font sizes: 10 pt, 12 pt, 14 pt, and 16 pt.
-- Added ~~strikethrough~~ support.
-- Made <u>underlines</u> thicker for better visibility.
-- Added support for `<hr>` section breaks.
-- Added support for "redaction" style rendering.
-- Added improved support for tables with simple markup.
-- Added ability to add bookmarks.
-- Added ability to remap front buttons that only applies in the reader.
-- Added Focus Reading and Guide Dots as optional reader modes.
-- Added Force Paragraph Indents for books that render as one giant wall of text.
-- Added ability to pin a sleep image as a favorite. The favorited image will always be displayed when your sleep settings are set to `Custom` or `Cover + Custom` (when no cover is available).
-- Added more in-reader control remapping options for side buttons, short power button clicks, and long-press menu actions, and more.
-- Added ability to mark a book as finished from the in-book menu. A pop-up will also display once 99% of the book is reached. This status allows tracking of total books read.
-- Added ability to move finished books to "Read" folder.
-- In-book menu to quickly adjust reader options without having to exit the book.
-- Reading stats: total books read, total reading time, number of sessions, pages turned, average session time, pages turned per minute. You can also set your reading stats as your sleep screen.
-- All-time reading stats [syncing](./docs/reading-stats-sync.md) between two CrossInk devices.
-- Reading [progress sync](./docs/nearby-position-sync.md) between two CrossInk devices.
-- Added customizable Auto Page Turn Interval (anything between 5-120 seconds).
-- Added ability to view Recent Books as a 3x3 grid view.
-- To view a more detailed list for each version, visit the [releases](https://github.com/uxjulia/CrossInk/releases) page to read release notes.
+None of this would exist without the people below. Every feature listed under "Where everything came from" is their work first.
 
 ---
 
-### Reader Fonts
+## Where everything came from
 
-The default fonts have been replaced with Lexend Deca and Bitter. These fonts have been chosen specifically to improve reading fluency and e-ink performance. These 'sturdier' typefaces feature uniform stroke weights and open geometries, allowing the X4/X3 to render crisp, high-contrast text with font-aliasing on while significantly reducing ghosting and artifacts.
+### CrossPoint Reader: the original firmware
+[crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), by Dave Allie and contributors.
 
-- [Lexend Deca](https://fonts.google.com/specimen/Lexend+Deca) - A research-backed sans-serif typeface designed to improve reading fluency. Lexend was engineered based on the theory that reading issues are often a design problem (visual crowding) rather than a cognitive one.
-- [Bitter](https://fonts.google.com/specimen/Bitter) - A "contemporary" slab serif typeface for text, it is specially designed for comfortably reading on digital screens. The consistent stroke weight of Bitter helps it render particularly well on e-ink devices. The medium weight has been chosen specifically for improved rendering on the X4/X3.
+This is the open-source firmware that every project below descends from:
+- EPUB rendering engine
+- reader
+- file browser
+- settings system
+- display and input drivers for the Xteink devices
 
-The UI now uses [Inter](https://fonts.google.com/specimen/Inter) as the display font which has improved readability at smaller sizes.
+### CrossInk: the base
+[uxjulia/CrossInk](https://github.com/uxjulia/CrossInk), v1.6.0.
 
-### Music and Supplemental Glyphs
+CrossBlot is a fork of CrossInk, so everything CrossInk does, CrossBlot does too. In particular:
+- **OPDS catalog browsing and downloads.** Works with Calibre / Calibre-Web, Kavita / Komga, and public catalogs.
+- **Web file transfer**: the browser-based upload, file manager, settings and fonts portal.
+- A lean, stable reader core that is careful with memory on the ESP32-C3.
+- Reader fonts (Lexend Deca and Bitter), font sizes, and SD-card fonts.
+- Reading stats, bookmarks, Focus Reading / Guide Dots, finished-book tracking.
+- Reader button remapping and the in-book quick menu.
+- Calibre wireless connect, WebDAV, USB transfer, and OTA updates.
+- The Lyra, Classic, Minimal and Dashboard themes.
 
-- Built-in reader fonts include music notation, selected Cyrillic glyphs, and the Project Hail Mary CJK fallback ranges. Additional SD-card fonts retain emoji fallback support.
+### CrumBLE: library and home-screen look
+[imshentastic/CrumBLE](https://github.com/imshentastic/CrumBLE), v4.7.1.
+
+CrumBLE's library features and visual style were ported onto the CrossInk base:
+- **Collections.** Create, rename, rearrange and sort collections, and add or remove books. This includes the collection store, library index and series detection.
+- **Bookshelf grid**: the 2×2 / 3×3 / 4×4 cover grid for browsing a collection.
+- **The Flow home theme**: a cover carousel with a collections shelf, CrumBLE's home icon bar and menu layout, and its perspective cover-tile cache.
+- **Black selection highlights** in lists and pop-up menus.
+- **Sleep-screen cycling**: tap the power button while asleep to cycle to the next sleep image.
+- The collection pickers and menus: add books, the bookshelf picker, sort picker, and rearrange screen.
+
+CrumBLE's own OPDS client and web uploader were deliberately *not* used; CrossInk's versions are used instead.
+
+### Duet: the five-cover carousel
+[lauren-alexandra/duet-xteink](https://github.com/lauren-alexandra/duet-xteink), by Lauren Landau.
+
+- The **five-cover carousel** geometry: a large centered cover with a selection ring, and two smaller perspective covers on each side. CrossBlot's Collection Carousel theme is built on it.
+
+### CrossInk Carousel
+[chintanvajariya/CrossInk-Carousel](https://github.com/chintanvajariya/CrossInk-Carousel).
+
+- The original multi-cover carousel home that Duet's carousel builds on.
+
+### TenorCross: button mapping
+[TenorGroup/cross](https://github.com/TenorGroup/cross-releases) ([cross.tenor.vn](https://cross.tenor.vn/en/tai.html)).
+
+- The **side-button navigation scheme**:
+  - On Home and the bookshelf, the side buttons move left and right, and the front buttons move up and down.
+  - In Settings, the side buttons step between tabs and the front buttons step through rows.
+- CrossBlot re-implements this as an input-axis swap rather than merging Tenor's code. Toggle it under **Settings → Controls → Side-Button Navigation**.
 
 ---
 
-### Font Sizes
+## What CrossBlot adds
 
-CrossInk includes 10 pt, 12 pt, 14 pt, and 16 pt built-in reader font sizes.
+These are new in CrossBlot, written while gluing the pieces above together:
 
-See [SD Card Fonts](./docs/sd-card-fonts.md) for installing additional font families and size ranges.
-
----
-
-### Reader features
-
-Reader Options, Focus Reading, Guide Dots, Force Paragraph Indents, reading stats, and finished-book behavior are documented in [Reader Features](./docs/reader-features.md).
-
-### Custom button actions
-
-CrossInk adds configurable button shortcuts.
-
-See [Controls](./docs/controls.md) for the full action list and defaults.
-
----
-
-## Tips for the best reading experience
-
-CrossInk runs on an ESP32-C3 with limited RAM, so very large folders or complex EPUBs can be slower than they would be on a phone, tablet, or desktop app.
-
-- Keep folders under about 200 files. For the smoothest browsing, aim for 50-100 files per folder.
-- Having 1000+ books on the SD card is fine if they are split into smaller folders, such as by author, series, genre, or read/unread status.
-- Avoid putting every book in the SD card root. The file browser has to scan and sort the current folder before it can show it.
-- Text-first EPUBs are the best fit. Large image-heavy EPUBs, scanned books, comics, and omnibus files with thousands of sections may load slowly or fail under memory pressure.
-- As a rough target, EPUBs under 20 MB tend to work the best. Files over 50 MB may still work, but they are more likely to be slow or memory-sensitive, especially if they contain many large images.
-- If an EPUB is unusually slow, try [optimizing](./docs/webserver.md#epub-optimization) it with the built-in web optimizer (via File Transfer) before copying it to the SD card: remove unused high-resolution images, split very large omnibus files, and avoid embedding multiple full font families when possible.
-- Use a reliable SD card and leave some free space. CrossInk stores settings, reading progress, cache files, stats, and generated book data on the card.
+- **Collection Carousel home theme** (the default):
+  - Browse your collections as a five-cover carousel. The collection name has arrows and an "n of N" counter, and you can scroll through the whole collection, not just five books.
+  - The centered book shows a borderless progress bar, with time read on the left and percent on the right, then the title and author.
+- **Add to collection from the file browser**, for EPUB, XTC/XTCH, TXT and Markdown files.
+- **Manga (XTC/XTCH) thumbnails**:
+  - White page margins are trimmed so covers fill their frame.
+  - Thumbnails stream from the file, so large manga no longer come out blank.
+- **Low-memory handling**:
+  - When the heap is fragmented after browsing the library, opening a book does a quick silent restart.
+  - The XTC reader retries once after a memory error instead of failing.
+- **Collections save reliably**: writes are deferred and debounced, and are always flushed before sleep, restart, or leaving the library.
+- **Interface touches**:
+  - The clock sits in the top-left of the home screen.
+  - Settings tabs sit on a plain white background.
+  - Pop-ups use black highlights.
+- **CrossBlot branding**: the ink-blot boot logo, the web portal, and the device and hotspot names (`CrossBlot-Reader`, `http://crossblot.local/`).
 
 ---
 
 ## Installation
 
-The fastest way to install Crossink is by using Inky, Crossink's web companion app: https://inky.crossink.dev/#flash-tools
+1. Download `firmware-x3-x4.bin` from this repo's [Releases](https://github.com/Huynie/crossBlot/releases).
+2. Flash it over USB, either with a web ESP flasher or with `esptool`. The X3 and X4 use the same binary.
+3. On first boot, the home screen uses the **Collection Carousel** theme. You can change it under **Settings → Display → Theme**.
 
-Download a `firmware-*.bin` from the [releases page](https://github.com/uxjulia/CrossInk/releases), then flash it with the web installer or command line.
+**OTA updates:** these check this repo's latest GitHub release. Releases need to be tagged with a version (e.g. `v1.1.0`), and the firmware asset must be named `firmware-x3-x4.bin`.
 
-See [Installation](./docs/installation.md) for step-by-step flashing and revert instructions.
-
----
-
-## Guides & Documentation
-
-Visit [https://www.crossink.dev](https://www.crossink.dev) for more user guides and additional documentation.
+**Coming from CrossInk or CrumBLE:** your SD card's `/.crosspoint` data is kept, including settings, progress, stats and collections. CrumBLE settings are migrated on first boot.
 
 ---
 
-## Development quick start
+## Building
 
-CrossInk uses PlatformIO for building and flashing firmware. See [Getting Started](./docs/development/getting-started.md) for prerequisites, clone setup, and validation commands.
-
-### Nix/NixOS
-
-Nix/NixOS users can enter the development shell with either `nix develop` (flakes) or `nix-shell`:
-
-```bash
-nix develop -f nix
-# or
-nix-shell nix
-```
-
-To flash a connected ESP32-C3 device, enable PlatformIO's udev rules in your NixOS configuration:
-
-```nix
-services.udev.packages = with pkgs; [ platformio-core.udev ];
-```
-
-After rebuilding the system configuration, reconnect the device or reload udev rules.
-
-### Build / flash / monitor
-
-Connect your device to your computer via a USB cable. Before the first build, initialize the repository's submodules (including `freeink-sdk`):
+CrossBlot uses PlatformIO.
 
 ```sh
 git submodule update --init --recursive
+pio run -e default                    # build for the X3 / X4
+pio run -e default --target upload    # build and flash a connected device
 ```
 
-Then flash the firmware using the correct environment for the device. The `default` environment is for the X3/X4 devices. ESP32-S3 devices have their own named environments.
+To build a release with a clean version string:
 
 ```sh
-pio run -e default --target upload
+CROSSINK_RELEASE_VERSION=1.0.0 pio run -e default
 ```
 
-If PlatformIO reports `PackageException: Can not create a symbolic link for freeink-sdk/libs/hardware/BatteryMonitor, not a directory`, the `freeink-sdk` submodule is not initialized. Run the submodule command above and retry.
+The firmware is written to `.pio/build/default/firmware.bin`.
 
-See [Testing and Debugging](./docs/development/testing-debugging.md) for serial logging, simulator checks, static analysis, and bug-report guidance.
+### Desktop simulator
+
+```sh
+pio run -e simulator-X3 -t run_simulator
+```
+
+- Set `CROSSPOINT_SIM_SD` to a folder to use it as the SD card. Otherwise the simulator uses `fs_/` in the repo.
+- Keys:
+
+  | Key | Action |
+  |---|---|
+  | Arrow keys | Navigate |
+  | Return | Confirm |
+  | Esc | Back |
+  | P | Power |
+
+See [docs/development](./docs/development) for the inherited CrossInk developer docs.
 
 ---
 
-## Notice on Contributions
+## License
 
-This repository does not accept pull requests. Feature requests may be opened in [discussions](https://github.com/uxjulia/CrossInk/discussions), but major features requiring ongoing support should be directed upstream to [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader).
+- CrossBlot is released under the [MIT License](./LICENSE), the same as CrossPoint Reader, CrossInk, CrumBLE, Duet and the other projects it draws from. Their copyright notices are kept.
+- The build bundles **wolfSSL** (`wolfssl/Arduino-wolfSSL`), which is licensed under the **GPL**. Compiled firmware binaries that include it are therefore covered by the GPL. If you redistribute binaries, distribute them under those terms.
 
----
-
-If you'd like to show some love and support ongoing development, please consider supporting me on Ko-fi.
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q01M6S7)
+CrossBlot is a personal project. It isn't affiliated with Xteink or with any of the upstream projects. Report CrossBlot issues here, not to the upstream authors.

@@ -576,7 +576,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Long-press page turn button behavior
   uint8_t longPressButtonBehavior = OFF;
   // UI Theme
-  uint8_t uiTheme = LYRA_FLOW;  // Crossblot: Flow home by default
+  uint8_t uiTheme = COLLECTION_CAROUSEL;  // CrossBlot: Collection Carousel home by default
   // Recent Books screen layout
   uint8_t recentBooksView = RECENT_BOOKS_LIST;
   // UI scale (list fonts + row heights); touch boards default one step larger

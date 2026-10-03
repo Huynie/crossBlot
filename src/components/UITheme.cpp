@@ -95,7 +95,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = &LyraCarouselMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_FLOW:
-      LOG_DBG("UI", "Using CrumBLE Flow theme");
+      LOG_DBG("UI", "Using Flow theme");
       currentTheme = std::make_unique<LyraFlowTheme>();
       currentMetrics = &LyraFlowMetrics::values;
       break;

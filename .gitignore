@@ -49,3 +49,6 @@ dist-publish/
 /CMakeLists.txt
 /dependencies.lock
 /sdkconfig.*
+
+# CrossBlot: local test builds and screenshots
+screenshots/

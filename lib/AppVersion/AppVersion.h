@@ -22,8 +22,8 @@
 #define CROSSINK_FIRMWARE_DEVICE_TYPE "unknown"
 #endif
 
-// Crossblot's own release version (CROSSINK_VERSION keeps tracking the CrossInk
-// base for OTA/compatibility checks).
+// CrossBlot's release version for the boot screen. CROSSINK_VERSION (macro name
+// kept for the build scripts) carries the same number from platformio.ini.
 #ifndef CROSSBLOT_VERSION
 #define CROSSBLOT_VERSION "1.0.0"
 #endif

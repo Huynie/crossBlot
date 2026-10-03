@@ -22,10 +22,10 @@ JSZIP = os.path.join(ROOT, "src", "network", "html", "js", "jszip.min.js")
 
 # slug -> (route, title, active, extra <head> markup)
 PAGES = {
-    "home":     ("/",         "CrossInk",                   "home",     ""),
-    "files":    ("/files",    "Files - CrossInk",           "files",    '  <script src="/js/jszip.min.js"></script>'),
-    "settings": ("/settings", "Settings - CrossInk Reader", "settings", ""),
-    "fonts":    ("/fonts",    "Fonts - CrossInk",           "fonts",    ""),
+    "home":     ("/",         "CrossBlot",                   "home",     ""),
+    "files":    ("/files",    "Files - CrossBlot",           "files",    '  <script src="/js/jszip.min.js"></script>'),
+    "settings": ("/settings", "Settings - CrossBlot Reader", "settings", ""),
+    "fonts":    ("/fonts",    "Fonts - CrossBlot",           "fonts",    ""),
 }
 ROUTE_TO_SLUG = {route: slug for slug, (route, *_rest) in PAGES.items()}
 
@@ -80,7 +80,7 @@ MOCK_API = {
         {"key": "quickResumeSleepScreen", "name": "Quick Resume on Timeout",
          "category": "Reading", "type": "toggle", "value": 0},
         {"key": "deviceName", "name": "Device Name", "category": "Network", "type": "string",
-         "value": "CrossInk-01"},
+         "value": "CrossBlot-01"},
     ],
 }
 
