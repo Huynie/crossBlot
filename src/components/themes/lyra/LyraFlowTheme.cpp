@@ -1362,8 +1362,8 @@ void LyraFlowTheme::drawButtonMenu(GfxRenderer& renderer, Rect /*rect*/, int but
   constexpr int kMenuIconPad = 14;          // → tile height = 14+32+14 = 60
   constexpr int kHighlightPad = 7;          // ring of padding around selected icon
   constexpr int kHighlightCorner = 6;
-  constexpr int kMenuLabelGap = 3;          // gap between the selection box and the label below it
-  constexpr int kMenuLabelBottomGap = 6;    // gap between the label and the button hints
+  constexpr int kMenuLabelGap = 3;          // gap between the label and the selection box below it
+  constexpr int kMenuRowBottomGap = 4;      // gap between the selection box and the button hints
 
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
@@ -1371,13 +1371,12 @@ void LyraFlowTheme::drawButtonMenu(GfxRenderer& renderer, Rect /*rect*/, int but
   const int tileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
   const int tileW = screenW / buttonCount;
   const int labelLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  // Crossblot: icons on top, label underneath, just above the button hints.
-  // The selection box spans [kMenuIconPad - kHighlightPad, tileH - that) of
-  // the tile, so the label hangs kMenuLabelGap below the box.
+  // CrossBlot: label on top, icons underneath, sitting just above the button
+  // hints. The selection box spans [boxInset, tileH - boxInset) of the tile.
   const int boxInset = kMenuIconPad - kHighlightPad;
-  const int rowY = screenH - hintsH - kMenuLabelBottomGap - labelLineHeight - kMenuLabelGap - (tileH - boxInset);
-  const int barTop = rowY + boxInset;
-  const int labelY = rowY + tileH - boxInset + kMenuLabelGap;
+  const int rowY = screenH - hintsH - kMenuRowBottomGap - (tileH - boxInset);
+  const int labelY = rowY + boxInset - kMenuLabelGap - labelLineHeight;
+  const int barTop = labelY;
 
   // Wipe the bar's vertical span so any prior render of the previous list
   // layout doesn't bleed through under the new tighter geometry.
@@ -1425,7 +1424,7 @@ void LyraFlowTheme::drawButtonMenu(GfxRenderer& renderer, Rect /*rect*/, int but
     }
   }
 
-  // Centered label below the icon row. Dual-purpose:
+  // Centered label above the icon row. Dual-purpose:
   //   - When an icon is focused: shows that icon's name (existing behavior).
   //   - When no icon is focused BUT a Collections book is focused:
   //     HomeActivity has set focusedBookAuthorForLabel to that book's
