@@ -69,7 +69,7 @@ Layout layoutFor(const GfxRenderer& renderer, const Rect& rect, const int sidePa
   l.textW = std::max(40, pageWidth - sidePadding * 2);
   l.titleLineH = renderer.getLineHeight(UI_12_FONT_ID);
   l.progressY = l.centerY + l.centerH + kSelectionPadding + 24;  // gap under the cover
-  l.progressLabelY = l.progressY + kProgressBarHeight + 4;
+  l.progressLabelY = l.progressY + kProgressBarHeight + 8;  // space under the bar
   l.titleY = l.progressLabelY + renderer.getLineHeight(SMALL_FONT_ID) + 6;
   return l;
 }
