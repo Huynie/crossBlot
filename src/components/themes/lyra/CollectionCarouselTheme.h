@@ -15,7 +15,7 @@ namespace CollectionCarouselMetrics {
 constexpr ThemeMetrics values = [] {
   ThemeMetrics v = LyraFlowMetrics::values;
   v.homeRecentBooksCount = 5;
-  v.homeTopPadding = 41;
+  v.homeTopPadding = 30;  // collection name sits just under the status bar
   return v;
 }();
 }  // namespace CollectionCarouselMetrics

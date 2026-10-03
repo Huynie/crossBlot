@@ -1362,7 +1362,7 @@ void LyraFlowTheme::drawButtonMenu(GfxRenderer& renderer, Rect /*rect*/, int but
   constexpr int kMenuIconPad = 14;          // → tile height = 14+32+14 = 60
   constexpr int kHighlightPad = 7;          // ring of padding around selected icon
   constexpr int kHighlightCorner = 6;
-  constexpr int kMenuLabelTopGap = 3;       // gap between label and icon row
+  constexpr int kMenuLabelTopGap = 1;       // gap between label and icon row
   constexpr int kMenuLabelBottomGap = 4;    // gap below label baseline
   constexpr int kMenuRowDrop = 31;          // pushes the bar closer to the screen bottom
 
@@ -1373,7 +1373,10 @@ void LyraFlowTheme::drawButtonMenu(GfxRenderer& renderer, Rect /*rect*/, int but
   const int tileW = screenW / buttonCount;
   const int labelLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int rowY = screenH - hintsH - tileH - kMenuLabelTopGap - labelLineHeight - kMenuLabelBottomGap + kMenuRowDrop;
-  const int labelY = rowY - kMenuLabelTopGap - labelLineHeight;
+  // Crossblot: sit the label just above the selection box (which starts
+  // kMenuIconPad - kHighlightPad into the tile) rather than above the whole
+  // tile, so the icon bar takes less height.
+  const int labelY = rowY + (kMenuIconPad - kHighlightPad) - kMenuLabelTopGap - labelLineHeight;
 
   // Wipe the bar's vertical span so any prior render of the previous list
   // layout doesn't bleed through under the new tighter geometry.
