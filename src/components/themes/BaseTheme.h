@@ -294,7 +294,7 @@ class BaseTheme {
                              bool showProgress = true, bool pageCountEstimated = false) const;
   virtual void drawTopStatusBarClock(const GfxRenderer& renderer, int topY = -1, const char* previewTime = nullptr,
                                      bool readerContext = true, int textYOffset = 0, bool darkMode = false,
-                                     bool forceVisible = false) const;
+                                     bool forceVisible = false, bool alignLeft = false) const;
   virtual void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;

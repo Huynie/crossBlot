@@ -1379,6 +1379,10 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
   const bool tabsFocused = selectedSettingIndex == 0;
   const bool borderedTabs = metrics.tabBarAppearance == ThemeTabBarAppearance::BorderedText;
   const bool roundedRaffTabs = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::ROUNDEDRAFF;
+  // Crossblot: the Flow-family themes keep the tab band white (no gray band or
+  // gray selected-tab box).
+  const bool whiteTabs = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_FLOW ||
+                         SETTINGS.uiTheme == CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL;
   tabProps.divider = true;
   fui::StyleSet tabStyles;
   if (roundedRaffTabs) {
@@ -1400,7 +1404,7 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
       tabStyles.selected.foreground = fui::Paint::solid(fui::Color::White);
       tabStyles.selected.radius = screen.theme().listRowRadius;
     } else {
-      tabStyles.selected.background = fui::Paint::dither(fui::Color::LightGray);
+      if (!whiteTabs) tabStyles.selected.background = fui::Paint::dither(fui::Color::LightGray);
       tabStyles.selected.foreground = fui::Paint::solid(fui::Color::Black);
       // Let the selected underline meet the shared bottom divider, as in the
       // original Lyra tab bar. The default bottom inset leaves a visible gap.
@@ -1440,7 +1444,7 @@ void SettingsActivity::buildSettingsScreen(UiApp::ScreenType& screen) {
 #endif
   {
     const fui::Rect tabRect = screen.takeTop(tabBand);
-    if (!roundedRaffTabs && !borderedTabs && tabsFocused) {
+    if (!roundedRaffTabs && !borderedTabs && !whiteTabs && tabsFocused) {
       screen.target().fill(tabRect, fui::Paint::dither(fui::Color::LightGray));
     }
     drawUiTabBar(screen, tabProps, tabRect, metrics.tabBarAppearance);

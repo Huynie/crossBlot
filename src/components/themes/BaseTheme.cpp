@@ -510,7 +510,10 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     drawBatteryRight(renderer, batteryRect, showBatteryPercentage);
   }
 
-  drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext, clockYOffset);
+  const bool flowFamilyHome = !readerContext && !hasVisibleTitle &&
+                             (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_FLOW ||
+                              SETTINGS.uiTheme == CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL);
+  drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext, clockYOffset, false, false, flowFamilyHome);
 }
 
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
@@ -1044,7 +1047,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
 void BaseTheme::drawTopStatusBarClock(const GfxRenderer& renderer, int topY, const char* previewTime,
                                       const bool readerContext, const int textYOffset, const bool darkMode,
-                                      const bool forceVisible) const {
+                                      const bool forceVisible, const bool alignLeft) const {
   if (!forceVisible &&
       !(readerContext ? SETTINGS.shouldShowClockInReader() : SETTINGS.shouldShowClockOutsideReader())) {
     return;
@@ -1077,7 +1080,9 @@ void BaseTheme::drawTopStatusBarClock(const GfxRenderer& renderer, int topY, con
 
   const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, timeText);
   const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int textX = (renderer.getScreenWidth() - textWidth) / 2;
+  // Crossblot: Flow-family Home puts the clock in the top-left corner,
+  // mirroring the battery's inset on the right.
+  const int textX = alignLeft ? metrics.headerSidePadding : (renderer.getScreenWidth() - textWidth) / 2;
   const int effectiveTextYOffset = textYOffset + UITheme::getTopStatusBarInset(renderer) +
                                    (readerContext ? homeHeaderClockTextYOffset(renderer) : 0);
   const int baseTopY = topY >= 0 ? topY : orientedMarginTop + metrics.topPadding;
