@@ -89,9 +89,22 @@ These are new in CrossBlot, written while gluing the pieces above together:
 - **Collections save reliably**: writes are deferred and debounced, and are always flushed before sleep, restart, or leaving the library.
 - **Interface touches**:
   - The clock sits in the top-left of the home screen.
-  - Settings tabs sit on a plain white background.
+  - With the Flow and Collection Carousel themes, Settings uses CrumBLE's layout: a list of categories that each open their own page, with black row highlights.
   - Pop-ups use black highlights.
-- **CrossBlot branding**: the ink-blot boot logo, the web portal, and the device and hotspot names (`CrossBlot-Reader`, `http://crossblot.local/`).
+- **CrossBlot branding**: a boot screen logo (see [Boot screen image](#boot-screen-image)), the web portal, and the device and hotspot names (`CrossBlot-Reader`, `http://crossblot.local/`).
+
+---
+
+## Boot screen image
+
+The logo on the boot screen (and the web portal) is a **temporary placeholder** until an official CrossBlot image is made.
+
+It's based on [**"Miau" by Alexandr Sidorovich**](https://dribbble.com/shots/1636544-Miau) on Dribbble. The artwork was converted to 1-bit black and white and resized for the e-ink display. All credit for the original illustration goes to Alexandr Sidorovich.
+
+Where it lives:
+- Source image: `assets/crossblot-logo.png`
+- Firmware bitmap: `src/images/CrossblotLogo.h`
+- Web portal logo: `web/assets/logo.png`
 
 ---
 
