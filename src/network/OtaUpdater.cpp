@@ -33,12 +33,14 @@ namespace {
 
 constexpr char latestReleaseUrl[] = CROSSINK_OTA_RELEASE_URL;
 
+// CrossBlot release assets: crossBlot-<device>.bin or crossBlot-<device>-<anything>.bin
+// (e.g. crossBlot-x3-x4-v1.0.0.bin).
 #ifdef CROSSINK_FIRMWARE_DEVICE_TYPE
-constexpr char firmwareAssetStem[] = "firmware-" CROSSINK_FIRMWARE_DEVICE_TYPE;
-constexpr char firmwareAssetName[] = "firmware-" CROSSINK_FIRMWARE_DEVICE_TYPE ".bin";
+constexpr char firmwareAssetStem[] = "crossBlot-" CROSSINK_FIRMWARE_DEVICE_TYPE;
+constexpr char firmwareAssetName[] = "crossBlot-" CROSSINK_FIRMWARE_DEVICE_TYPE ".bin";
 #else
-constexpr char firmwareAssetStem[] = "firmware";
-constexpr char firmwareAssetName[] = "firmware.bin";
+constexpr char firmwareAssetStem[] = "crossBlot";
+constexpr char firmwareAssetName[] = "crossBlot.bin";
 #endif
 
 constexpr char binSuffix[] = ".bin";

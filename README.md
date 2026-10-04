@@ -110,11 +110,11 @@ Where it lives:
 
 ## Installation
 
-1. Download `firmware-x3-x4.bin` from this repo's [Releases](https://github.com/Huynie/crossBlot/releases).
+1. Download `crossBlot-x3-x4-vX.Y.Z.bin` from this repo's [Releases](https://github.com/Huynie/crossBlot/releases).
 2. Flash it over USB, either with a web ESP flasher or with `esptool`. The X3 and X4 use the same binary.
 3. On first boot, the home screen uses the **Collection Carousel** theme. You can change it under **Settings → Display → Theme**.
 
-**OTA updates:** these check this repo's latest GitHub release. Releases need to be tagged with a version (e.g. `v1.1.0`), and the firmware asset must be named `firmware-x3-x4.bin`.
+**OTA updates:** these check this repo's latest GitHub release. Releases need to be tagged with a version (e.g. `v1.1.0`), and the firmware file must be named `crossBlot-x3-x4.bin` or `crossBlot-x3-x4-<anything>.bin` (e.g. `crossBlot-x3-x4-v1.1.0.bin`).
 
 **Coming from CrossInk or CrumBLE:** your SD card's `/.crosspoint` data is kept, including settings, progress, stats and collections. CrumBLE settings are migrated on first boot.
 
