@@ -18,6 +18,7 @@
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "activities/reader/BookReadingStats.h"
+#include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/chart.h"
@@ -135,6 +136,15 @@ void LyraFlowTheme::drawShelfHeader(const GfxRenderer& renderer, const int pageW
   renderer.drawLine(rect.x, rect.y + rect.height - 2, rect.x + rect.width - 1, rect.y + rect.height - 2, 2, true);
 }
 
+void LyraFlowTheme::drawScaledList(const GfxRenderer& renderer, const Rect rect, const int itemCount,
+                                   const int selectedIndex, const std::function<std::string(int index)>& rowTitle,
+                                   const std::function<std::string(int index)>& rowValue,
+                                   const std::function<bool(int index)>& isHeader, const int fontId) {
+  static const LyraFlowTheme painter;  // only its (stateless) list drawing is used
+  painter.drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, nullptr, nullptr, rowValue, false,
+                              nullptr, isHeader, LyraFlowMetrics::values, true, 1, true, fontId);
+}
+
 void LyraFlowTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                              const std::function<std::string(int index)>& rowTitle,
                              const std::function<std::string(int index)>& rowSubtitle,
@@ -143,9 +153,12 @@ void LyraFlowTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCou
                              const std::function<bool(int index)>& rowDimmed,
                              const std::function<bool(int index)>& isHeader, const int rowHeightScale,
                              const bool showSelection) const {
+  // Single-line rows follow Settings > Display > UI Scale; two-line rows keep
+  // the small font so the subtitle still fits their fixed height.
+  const int fontId = rowSubtitle ? -1 : uiScaleSpec().bodyFontId;
   drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
                       highlightValue, rowDimmed, isHeader, LyraFlowMetrics::values, true, rowHeightScale,
-                      showSelection);
+                      showSelection, fontId);
 }
 
 int LyraFlowTheme::bakeAllTilesForCover(GfxRenderer& renderer, const std::string& coverBmpPath) {

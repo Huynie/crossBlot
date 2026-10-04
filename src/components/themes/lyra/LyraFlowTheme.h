@@ -44,6 +44,12 @@ class LyraFlowTheme : public LyraTheme {
   static constexpr int kShelfHeaderTop = 4;
   static constexpr int kShelfHeaderHeight = 52;
   static void drawShelfHeader(const GfxRenderer& renderer, int pageWidth, const char* title);
+  // Black-row list in a chosen font (Settings follows the UI Scale setting).
+  // Static so callers don't depend on which theme object is loaded.
+  static void drawScaledList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                             const std::function<std::string(int index)>& rowTitle,
+                             const std::function<std::string(int index)>& rowValue,
+                             const std::function<bool(int index)>& isHeader, int fontId);
 
   // Crossblot: black (inverted) selected rows in every list, matching the
   // icon bar's black highlight.

@@ -1383,20 +1383,22 @@ void SettingsActivity::renderCrumbleSettings() {
   const Rect listRect{0, listTop, pageWidth,
                       pageHeight - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing - footerHeight};
 
+  // Text size follows Settings > Display > UI Scale, like the tabbed screen.
+  const int fontId = uiScaleSpec().bodyFontId;
   if (crumbleAtRoot) {
-    GUI.drawList(
+    LyraFlowTheme::drawScaledList(
         renderer, listRect, categoryCount, crumbleRootIndex,
-        [](const int i) { return std::string(I18N.get(categoryNames[i])); }, nullptr, nullptr,
-        [](int) { return std::string(">"); });
+        [](const int i) { return std::string(I18N.get(categoryNames[i])); }, [](int) { return std::string(">"); },
+        nullptr, fontId);
   } else {
     const auto& settings = *currentSettings;
-    GUI.drawList(
+    LyraFlowTheme::drawScaledList(
         renderer, listRect, settingsCount, selectedSettingIndex - 1,
-        [&settings](const int i) { return std::string(I18N.get(settings[i].nameId)); }, nullptr, nullptr,
+        [&settings](const int i) { return std::string(I18N.get(settings[i].nameId)); },
         [&settings](const int i) {
           return settings[i].type == SettingType::SECTION_HEADER ? std::string() : settingValueText(settings[i]);
         },
-        false, nullptr, [&settings](const int i) { return settings[i].type == SettingType::SECTION_HEADER; });
+        [&settings](const int i) { return settings[i].type == SettingType::SECTION_HEADER; }, fontId);
     if (showVersion) drawSystemVersionFooter(renderer, pageWidth, pageHeight, metrics);
   }
 

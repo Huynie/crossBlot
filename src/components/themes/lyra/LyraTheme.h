@@ -130,7 +130,8 @@ class LyraTheme : public BaseTheme {
                            const std::function<std::string(int index)>& rowValue, bool highlightValue,
                            const std::function<bool(int index)>& rowDimmed,
                            const std::function<bool(int index)>& isHeader, const ThemeMetrics& metrics,
-                           bool invertSelectedRows, int rowHeightScale = 1, bool showSelection = true) const;
+                           bool invertSelectedRows, int rowHeightScale = 1, bool showSelection = true,
+                           int fontId = -1) const;  // -1 = UI_10_FONT_ID
 
   // Returns nullptr when the icon or requested bitmap size is not available.
   static const freeink::Icon* iconForName(UIIcon icon, uint32_t size);

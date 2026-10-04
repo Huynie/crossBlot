@@ -213,13 +213,16 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
                                     const std::function<bool(int index)>& rowDimmed,
                                     const std::function<bool(int index)>& isHeader, const ThemeMetrics& metrics,
                                     const bool invertSelectedRows, const int rowHeightScale,
-                                    const bool showSelection) const {
+                                    const bool showSelection, const int fontId) const {
+  const int listFont = fontId >= 0 ? fontId : UI_10_FONT_ID;
   const int rowScale = std::max(1, rowHeightScale);
   int rowHeight = ((rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight) * rowScale;
+  // Larger fonts get taller rows so the highlight keeps its padding.
+  if (rowSubtitle == nullptr) rowHeight = std::max(rowHeight, renderer.getLineHeight(listFont) + 14);
   if (itemCount <= 0) return;
   const auto isHeaderRow = [&isHeader](int index) { return isHeader != nullptr && isHeader(index); };
   const int sectionHeaderTopPadding = halTiltSensor.isAvailable() ? 10 : 20;
-  constexpr int sectionHeaderFontId = UI_10_FONT_ID;
+  const int sectionHeaderFontId = listFont;
   constexpr int sectionHeaderUnderlineGap = 4;
   const int sectionHeaderLineHeight = renderer.getLineHeight(sectionHeaderFontId);
   const int sectionHeaderRowHeight = sectionHeaderLineHeight + sectionHeaderUnderlineGap;
@@ -267,7 +270,7 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
     textWidth -= iconSize + hPaddingInSelection;
   }
 
-  const int titleLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int titleLineHeight = renderer.getLineHeight(listFont);
 
   // Draw all items using a running Y to accommodate variable-height section headers.
   int currentY = rect.y;
@@ -303,20 +306,20 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
     if (rowValue != nullptr) {
       valueText = rowValue(i);
       if (!valueText.empty()) {
-        valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxListValueWidth);
-        valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + hPaddingInSelection;
+        valueText = renderer.truncatedText(listFont, valueText.c_str(), maxListValueWidth);
+        valueWidth = renderer.getTextWidth(listFont, valueText.c_str()) + hPaddingInSelection;
         rowTextWidth -= valueWidth;
       }
     }
 
     auto itemName = rowTitle(i);
-    auto item = renderer.truncatedText(UI_10_FONT_ID, itemName.c_str(), rowTextWidth);
+    auto item = renderer.truncatedText(listFont, itemName.c_str(), rowTextWidth);
     const int titleY = rowSubtitle != nullptr ? itemY + 7 : centeredRowY(itemY, currentRowHeight, titleLineHeight);
-    renderer.drawText(UI_10_FONT_ID, textX, titleY, item.c_str(), foreground);
+    renderer.drawText(listFont, textX, titleY, item.c_str(), foreground);
 
     // Apply checkerboard dither to create gray text effect for dimmed items
     if (rowDimmed && rowDimmed(i) && !selectedRow) {
-      const int titleWidth = renderer.getTextWidth(UI_10_FONT_ID, item.c_str());
+      const int titleWidth = renderer.getTextWidth(listFont, item.c_str());
       for (int py = titleY; py < titleY + titleLineHeight; py++)
         for (int px = textX; px < textX + titleWidth; px++)
           if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
@@ -353,7 +356,7 @@ void LyraTheme::drawListWithMetrics(const GfxRenderer& renderer, Rect rect, int 
 
       const int valueY = rowSubtitle != nullptr ? itemY + 16 : centeredRowY(itemY, currentRowHeight, titleLineHeight);
       const bool valueForeground = invertSelectedRows ? !selectedRow : !(selectedRow && highlightValue);
-      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - metrics.contentSidePadding - valueWidth, valueY,
+      renderer.drawText(listFont, rect.x + contentWidth - metrics.contentSidePadding - valueWidth, valueY,
                         valueText.c_str(), valueForeground);
     }
   }
