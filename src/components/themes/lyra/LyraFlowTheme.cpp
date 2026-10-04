@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "CoverTiles.h"
+#include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "activities/reader/BookReadingStats.h"
 #include "components/UITheme.h"
@@ -113,6 +114,27 @@ void cutRoundedCorners(GfxRenderer& renderer, int x, int y, int w, int h, int r)
 // at-once is ~17 KB. That's within the Settings-time budget (fresh heap
 // after leaving Home) but the SettingsActivity caller does no other
 // concurrent alloc during the bake loop, so this is safe.
+void LyraFlowTheme::drawShelfHeader(const GfxRenderer& renderer, const int pageWidth, const char* title) {
+  const Rect rect{0, kShelfHeaderTop, pageWidth, kShelfHeaderHeight};
+  renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
+
+  const bool showBatteryPercentage =
+      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
+  const int batteryX = rect.x + rect.width - 12 - LyraMetrics::values.batteryWidth;
+  // Battery sits in the same slot as on Home (LyraMetrics::topPadding).
+  const int batteryY = LyraMetrics::values.topPadding + 2;
+  GUI.drawBatteryRight(renderer,
+                       Rect{batteryX, batteryY, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
+                       showBatteryPercentage);
+
+  const int titleMaxWidth = rect.width - LyraMetrics::values.contentSidePadding * 3;
+  const std::string truncated = renderer.truncatedText(UI_12_FONT_ID, title, titleMaxWidth, EpdFontFamily::BOLD);
+  const int titleY = rect.y + LyraMetrics::values.batteryHeight + 6;
+  renderer.drawText(UI_12_FONT_ID, rect.x + LyraMetrics::values.contentSidePadding, titleY, truncated.c_str(), true,
+                    EpdFontFamily::BOLD);
+  renderer.drawLine(rect.x, rect.y + rect.height - 2, rect.x + rect.width - 1, rect.y + rect.height - 2, 2, true);
+}
+
 void LyraFlowTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                              const std::function<std::string(int index)>& rowTitle,
                              const std::function<std::string(int index)>& rowSubtitle,

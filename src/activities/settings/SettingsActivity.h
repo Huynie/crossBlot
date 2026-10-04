@@ -267,6 +267,11 @@ class SettingsActivity final : public Activity {
   // renderer before this activity enters, so retain the requested layout.
   GfxRenderer::Orientation entryOrientation;
   bool showSettingSelection = true;
+  // CrossBlot: CrumBLE-style Settings for the Flow-family themes on button
+  // devices -- a root list of categories that drills into each one, in place
+  // of the tab band.
+  bool crumbleAtRoot = true;
+  int crumbleRootIndex = 0;
   SettingAction activeSubmenu = SettingAction::None;
   SettingAction parentSubmenu = SettingAction::None;
 
@@ -294,6 +299,9 @@ class SettingsActivity final : public Activity {
   void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
 
   void enterCategory(int categoryIndex);
+  bool usesCrumbleLayout() const;
+  void renderCrumbleSettings();
+  bool handleCrumbleInput();
   void setCurrentSettingsForCategory();
   StrId activeSubmenuTitleId() const;
   void openSubmenu(SettingAction action);

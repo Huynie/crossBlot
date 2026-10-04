@@ -27,6 +27,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
+#include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "fontIds.h"
 
@@ -63,44 +64,14 @@ constexpr unsigned long kLongPressMs = 1000;
 // CrumBLE #133 follow-up: pulled up from 8 -> 4 px so the "Bookshelf"
 // title text + divider sit closer to the top edge, freeing 4 px below
 // for the grid / page-dots band.
-constexpr int kHeaderTopPadding = 4;
-constexpr int kHeaderHeight = 52;
+constexpr int kHeaderTopPadding = LyraFlowTheme::kShelfHeaderTop;
+constexpr int kHeaderHeight = LyraFlowTheme::kShelfHeaderHeight;
 constexpr int kHeaderToStripGap = 14;
 constexpr int kLyraGridContentTop = kHeaderTopPadding + kHeaderHeight + kHeaderToStripGap;
 constexpr int kLyraGridSpacing = LyraMetrics::values.verticalSpacing;
 
 void drawGridHeader(const GfxRenderer& renderer, const int pageWidth, const char* titleText) {
-  const Rect rect{0, kHeaderTopPadding, pageWidth, kHeaderHeight};
-  renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
-
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = rect.x + rect.width - 12 - LyraMetrics::values.batteryWidth;
-  // CrumBLE #133 follow-up: battery Y anchored to LyraMetrics::topPadding
-  // (the value LyraTheme::drawHeader uses on Home) instead of the
-  // Bookshelf's own kHeaderTopPadding -- so the battery sits in the
-  // same vertical slot whether the user is on Home or in Bookshelf.
-  // Title text + divider still use rect.y / kHeaderTopPadding (which
-  // moved up a smidge in this round), but they're at a different x
-  // from the right-aligned battery so they don't visually collide.
-  const int batteryY = LyraMetrics::values.topPadding + 2;
-  GUI.drawBatteryRight(renderer,
-                       Rect{batteryX, batteryY, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
-                       showBatteryPercentage);
-
-  const int titleMaxWidth = rect.width - LyraMetrics::values.contentSidePadding * 3;
-  const std::string title =
-      renderer.truncatedText(UI_12_FONT_ID, titleText, titleMaxWidth, EpdFontFamily::BOLD);
-  // Title baseline lands a few px below the battery icon -- gives the
-  // collection name room while keeping it nestled in the header rather
-  // than floating in dead space above the divider.
-  const int titleY = rect.y + LyraMetrics::values.batteryHeight + 6;
-  renderer.drawText(UI_12_FONT_ID, rect.x + LyraMetrics::values.contentSidePadding, titleY,
-                    title.c_str(), true, EpdFontFamily::BOLD);
-  // Divider line at the bottom of the header strip, drawn at the
-  // standard 2-px weight (back from the 1-px we briefly tried; matches
-  // the visual heft of the rest of the Lyra UI).
-  renderer.drawLine(rect.x, rect.y + rect.height - 2, rect.x + rect.width - 1, rect.y + rect.height - 2, 2, true);
+  LyraFlowTheme::drawShelfHeader(renderer, pageWidth, titleText);
 }
 
 // CrumBLE 4.4: normalizeAuthorMeta moved to RecentBooksStore.h so the

@@ -39,6 +39,12 @@ constexpr ThemeMetrics values = [] {
 
 class LyraFlowTheme : public LyraTheme {
  public:
+  // CrumBLE's Bookshelf header: battery top-right, bold title on the left,
+  // 2-px divider. Shared by the Bookshelf grid and Settings.
+  static constexpr int kShelfHeaderTop = 4;
+  static constexpr int kShelfHeaderHeight = 52;
+  static void drawShelfHeader(const GfxRenderer& renderer, int pageWidth, const char* title);
+
   // Crossblot: black (inverted) selected rows in every list, matching the
   // icon bar's black highlight.
   void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,

@@ -41,6 +41,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/CompactHeader.h"
+#include "components/themes/lyra/LyraFlowTheme.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -711,6 +712,8 @@ void SettingsActivity::onEnter() {
 
   selectedCategoryIndex = isFileBrowserView() ? 3 : 0;
   selectedSettingIndex = 0;
+  crumbleAtRoot = true;
+  crumbleRootIndex = 0;
   activeSubmenu = SettingAction::None;
   parentSubmenu = SettingAction::None;
   if (!isFileBrowserView()) {
@@ -798,6 +801,7 @@ void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valueP
     RenderLock lock(*this);
     if (themeChanged) {
       UITheme::getInstance().reload();
+      crumbleAtRoot = false;  // stay in Display when switching into a Flow theme
     }
     const auto spec = uiScaleSpec();
     uiTarget.setFont(fui::GfxRendererTarget::FONT_SMALL, spec.smallFontId);
@@ -809,6 +813,7 @@ void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valueP
 
 void SettingsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+  if (usesCrumbleLayout() && handleCrumbleInput()) return;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (TouchHeaderBackButton::wasTapped(mappedInput, settingsHeaderRect(metrics, renderer.getScreenWidth()))) {
@@ -1274,6 +1279,137 @@ void SettingsActivity::openIdleTimeThresholdPicker() {
       });
 }
 
+bool SettingsActivity::usesCrumbleLayout() const {
+  // Touch devices keep the FreeInkUI tab screen: its hit-testing lives there.
+  if (isFileBrowserView() || mappedInput.hasTouchHardware()) return false;
+  return SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_FLOW ||
+         SETTINGS.uiTheme == CrossPointSettings::UI_THEME::COLLECTION_CAROUSEL;
+}
+
+// CrumBLE-style navigation: the root lists the categories; Confirm drills in,
+// Back climbs out (submenu -> category -> root -> exit). Either button pair
+// steps the selection, so Tenor-style and stock layouts both work.
+bool SettingsActivity::handleCrumbleInput() {
+  using Button = MappedInputManager::Button;
+
+  const auto isHeaderRow = [this](const int row) {
+    return (*currentSettings)[row].type == SettingType::SECTION_HEADER;
+  };
+  // selectedSettingIndex is 1-based here too (0 was the tab band); keep it on
+  // a real row after any action that may have reset it.
+  const auto settleOnRow = [this, &isHeaderRow](int row, const bool forward) {
+    if (settingsCount <= 0) {
+      selectedSettingIndex = 1;
+      return;
+    }
+    row = (row % settingsCount + settingsCount) % settingsCount;
+    for (int guard = 0; guard < settingsCount && isHeaderRow(row); ++guard) {
+      row = forward ? (row + 1) % settingsCount : (row + settingsCount - 1) % settingsCount;
+    }
+    selectedSettingIndex = row + 1;
+    showSettingSelection = true;
+  };
+
+  if (crumbleAtRoot) {
+    if (mappedInput.wasPressed(Button::Back)) {
+      closeRootSettings();
+      return true;
+    }
+    if (mappedInput.wasReleased(Button::Confirm)) {
+      crumbleAtRoot = false;
+      enterCategory(crumbleRootIndex);
+      settleOnRow(0, true);
+      requestUpdate();
+      return true;
+    }
+    buttonNavigator.onPressAndContinuous({Button::Down, Button::Right}, [this] {
+      crumbleRootIndex = ButtonNavigator::nextIndex(crumbleRootIndex, categoryCount);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({Button::Up, Button::Left}, [this] {
+      crumbleRootIndex = ButtonNavigator::previousIndex(crumbleRootIndex, categoryCount);
+      requestUpdate();
+    });
+    return true;
+  }
+
+  if (mappedInput.wasPressed(Button::Back)) {
+    if (activeSubmenu != SettingAction::None) {
+      closeSubmenu();
+      settleOnRow(0, true);
+    } else {
+      crumbleAtRoot = true;
+      crumbleRootIndex = selectedCategoryIndex;
+    }
+    requestUpdate();
+    return true;
+  }
+  if (mappedInput.wasReleased(Button::Confirm)) {
+    toggleCurrentSetting();
+    if (selectedSettingIndex < 1 || selectedSettingIndex > settingsCount ||
+        isHeaderRow(selectedSettingIndex - 1)) {
+      settleOnRow(std::max(selectedSettingIndex - 1, 0), true);
+    }
+    requestUpdate();
+    return true;
+  }
+  buttonNavigator.onPressAndContinuous({Button::Down, Button::Right}, [this, &settleOnRow] {
+    settleOnRow(selectedSettingIndex, true);  // 1-based index == next 0-based row
+    requestUpdate();
+  });
+  buttonNavigator.onPressAndContinuous({Button::Up, Button::Left}, [this, &settleOnRow] {
+    settleOnRow(selectedSettingIndex - 2, false);
+    requestUpdate();
+  });
+  return true;
+}
+
+void SettingsActivity::renderCrumbleSettings() {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+
+  const char* title = tr(STR_SETTINGS_TITLE);
+  if (!crumbleAtRoot) {
+    const StrId submenuTitle = activeSubmenuTitleId();
+    title = I18N.get(submenuTitle != StrId::STR_NONE_OPT ? submenuTitle : categoryNames[selectedCategoryIndex]);
+  }
+  LyraFlowTheme::drawShelfHeader(renderer, pageWidth, title);
+
+  // System shows the build version above the hints; keep the list clear of it.
+  const bool showVersion = !crumbleAtRoot && selectedCategoryIndex == 3;
+  const int listTop = LyraFlowTheme::kShelfHeaderTop + LyraFlowTheme::kShelfHeaderHeight + metrics.verticalSpacing;
+  const int footerHeight = showVersion ? renderer.getLineHeight(SMALL_FONT_ID) * 2 + metrics.verticalSpacing : 0;
+  const Rect listRect{0, listTop, pageWidth,
+                      pageHeight - listTop - metrics.buttonHintsHeight - metrics.verticalSpacing - footerHeight};
+
+  if (crumbleAtRoot) {
+    GUI.drawList(
+        renderer, listRect, categoryCount, crumbleRootIndex,
+        [](const int i) { return std::string(I18N.get(categoryNames[i])); }, nullptr, nullptr,
+        [](int) { return std::string(">"); });
+  } else {
+    const auto& settings = *currentSettings;
+    GUI.drawList(
+        renderer, listRect, settingsCount, selectedSettingIndex - 1,
+        [&settings](const int i) { return std::string(I18N.get(settings[i].nameId)); }, nullptr, nullptr,
+        [&settings](const int i) {
+          return settings[i].type == SettingType::SECTION_HEADER ? std::string() : settingValueText(settings[i]);
+        },
+        false, nullptr, [&settings](const int i) { return settings[i].type == SettingType::SECTION_HEADER; });
+    if (showVersion) drawSystemVersionFooter(renderer, pageWidth, pageHeight, metrics);
+  }
+
+  const char* confirmLabel = tr(STR_SELECT);
+  if (!crumbleAtRoot && selectedSettingIndex >= 1 && selectedSettingIndex <= settingsCount) {
+    const auto& setting = (*currentSettings)[selectedSettingIndex - 1];
+    if (setting.type == SettingType::TOGGLE) confirmLabel = tr(STR_TOGGLE);
+  }
+  const auto labels =
+      mappedInput.mapLabels(mappedInput.withBackArrow(tr(STR_BACK)), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
 std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
   if (settingShowsNavigationCaret(setting)) return ">";
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
@@ -1513,6 +1649,12 @@ void SettingsActivity::render(RenderLock&&) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
 
   renderer.clearScreen();
+
+  if (usesCrumbleLayout()) {
+    renderCrumbleSettings();
+    renderer.displayBuffer();
+    return;
+  }
 
   const auto pageWidth = renderer.getScreenWidth();
   const auto& metrics = UITheme::getInstance().getMetrics();
