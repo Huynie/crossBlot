@@ -120,15 +120,7 @@ void drawDefaultBootLogo(const GfxRenderer& renderer) {
 
   renderer.clearScreen();
   // Crossblot: the ink-blot logo centred, product + version at the bottom.
-  const int logoX = (pageWidth - kCrossblotLogoWidth) / 2;
-  const int logoY = (pageHeight - kCrossblotLogoHeight) / 2;
-  constexpr int logoRowBytes = (kCrossblotLogoWidth + 7) / 8;
-  for (int y = 0; y < kCrossblotLogoHeight; ++y) {
-    const uint8_t* row = CrossblotLogo + y * logoRowBytes;
-    for (int x = 0; x < kCrossblotLogoWidth; ++x) {
-      if (row[x / 8] & (0x80 >> (x % 8))) renderer.drawPixel(logoX + x, logoY + y, true);
-    }
-  }
+  drawCrossblotLogo(renderer, (pageWidth - kCrossblotLogoWidth) / 2, (pageHeight - kCrossblotLogoHeight) / 2);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, "CrossBlot v" CROSSBLOT_VERSION);
 }
 

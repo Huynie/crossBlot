@@ -38,7 +38,7 @@
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
+#include "images/CrossblotLogo.h"
 #include "images/MoonIcon.h"
 
 namespace {
@@ -671,9 +671,12 @@ void SleepActivity::renderDefaultSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSINK), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_SLEEPING));
+  // Same ink-blot logo as the boot screen, name and status underneath.
+  const int logoY = (pageHeight - kCrossblotLogoHeight) / 2;
+  const int textY = logoY + kCrossblotLogoHeight + 24;
+  drawCrossblotLogo(renderer, (pageWidth - kCrossblotLogoWidth) / 2, logoY);
+  renderer.drawCenteredText(UI_10_FONT_ID, textY, tr(STR_CROSSINK), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(SMALL_FONT_ID, textY + 25, tr(STR_SLEEPING));
 
   // Make sleep screen dark unless light is selected in settings
   const bool lightSleepScreen = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT;
@@ -685,7 +688,7 @@ void SleepActivity::renderDefaultSleepScreen() const {
   const std::string buildInfo = std::string(CROSSINK_BUILD_ENV) + " " + CROSSINK_VERSION;
   const std::string visibleBuildInfo =
       renderer.truncatedText(SMALL_FONT_ID, buildInfo.c_str(), pageWidth - sleepBuildInfoSideMargin * 2);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 118, visibleBuildInfo.c_str(), lightSleepScreen);
+  renderer.drawCenteredText(SMALL_FONT_ID, textY + 48, visibleBuildInfo.c_str(), lightSleepScreen);
 #endif
 
   renderer.displayBuffer(HalDisplay::HALF_REFRESH, TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH);
